@@ -1,4 +1,4 @@
-# Copyright 2013 Intel Corporation.
+# Copyright 2014 VMTurbo Inc.
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -13,8 +13,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from nova.compute.monitors.virt import cpu_monitor
-from nova.compute.monitors.virt import memory_monitor
+"""
+Memory monitor to retrieve Memory information
+"""
 
-ComputeDriverCPUMonitor = cpu_monitor.ComputeDriverCPUMonitor
-ComputeDriverMemoryMonitor = memory_monitor.ComputeDriverMemoryMonitor
+from nova.compute import monitors
+
+
+class _MemoryMonitorBase(monitors.ResourceMonitorBase):
+    """Memory monitor base."""
+
+    def _get_memory_used(self, **kwargs):
+        """Return used memory and its timestamp."""
+        return None, None
