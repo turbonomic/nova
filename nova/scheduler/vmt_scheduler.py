@@ -89,9 +89,8 @@ class VMTScheduler(driver.Scheduler):
         if host in hosts:
             LOG.info('Host selected by VMTurbo ' + host)
         else:
-            host = random.choice(hosts)
-            LOG.info('Selecting random host. Check logs for reason')
-            msg = _("Selecting random host")
+            LOG.info('VMTurbo Scheduler failed. Check logs for reason')
+            raise Exception('Scheduler failed. Please try again later.')
         return host
  
     def select_destinations(self, context, request_spec, filter_properties):
