@@ -205,7 +205,7 @@ class VMTScheduler(driver.Scheduler):
         LOG.info("Getting template uuid for serviceUuid: " + service_uuid)
         all_templates_xml = self.apiGet("/templates")
         for xml_line in all_templates_xml:
-            if ((self.parseField("displayName", xml_line) == flavor_name) &
+            if ((self.parseField("displayName", xml_line).endswith("::TMP-" + flavor_name)) &
                 (service_uuid in self.parseField("services", xml_line))):
                 templateUuid = self.parseField("uuid", xml_line)
                 break
