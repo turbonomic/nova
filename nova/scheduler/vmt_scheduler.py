@@ -84,13 +84,14 @@ class VMTScheduler(driver.Scheduler):
         host = ''
         if self.host_array:
             host = self.host_array.pop()
+            if host in hosts:
+                LOG.info('Host selected by VMTurbo ' + host)
+            else:
+                host = random.choice(hosts)
+                LOG.info('Host selected by VMTurbo is not available for service. Selecting random host ' + host)
         else:
-            raise Exception('VMTurbo could not schedule workload')
-        if host in hosts:
-            LOG.info('Host selected by VMTurbo ' + host)
-        else:
-            LOG.info('VMTurbo Scheduler failed. Check logs for reason')
-            raise Exception('Scheduler failed. Please try again later.')
+            host = random.choice(hosts)
+            LOG.info('OpsMgr failed to schedule, Check OpsMgr logs for reason. Selecting random host ' + host)
         return host
  
     def select_destinations(self, context, request_spec, filter_properties):
@@ -131,9 +132,10 @@ class VMTScheduler(driver.Scheduler):
         try:
             self.templateName = self.getTemplateFromUuid(self.flavor_name, self.deploymentProfile)
             reservationUuid = self.requestPlacement(self.isSchedulerHintPresent)
-            LOG.info("Template UUID " + self.templateName + " : Reservation UUID " + reservationUuid)
-            self.pollForStatus(reservationUuid)
-            self.deletePlacement(reservationUuid)
+            if "ERROR" != reservationUuid and "" != reservationUuid and reservationUuid is not None:
+                LOG.info("Template UUID " + self.templateName + " : Reservation UUID " + reservationUuid)
+                self.pollForStatus(reservationUuid)
+                self.deletePlacement(reservationUuid)
         except:
             e = sys.exc_info()[0]
             type, value, tb = sys.exc_info()
@@ -275,4 +277,3 @@ class VMTScheduler(driver.Scheduler):
         fullUrl = self.vmt_url + postUrl
         response = requests.post( fullUrl , data=requests_data_dict , auth=self.auth)
         return self.getXmlFromResponse(response.content)
-
