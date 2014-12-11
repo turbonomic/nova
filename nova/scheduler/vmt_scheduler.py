@@ -118,8 +118,11 @@ class VMTScheduler(driver.Scheduler):
         self.isSchedulerHintPresent = False
         if 'scheduler_hints' in filter_properties:
             if 'group' in filter_properties['scheduler_hints']:
-                self.isSchedulerHintPresent = True
                 self.scheduler_hint = filter_properties['scheduler_hints']['group']
+                if self.scheduler_hint is not None:
+                    self.isSchedulerHintPresent = True
+                else:
+                    self.scheduler_hint = ''
             else:
                 LOG.info('group not found in filter_properties[\'scheduler_hints\']')
         else:
@@ -127,7 +130,7 @@ class VMTScheduler(driver.Scheduler):
 
 
         LOG.info(self.reservationName + " : " + self.vmPrefix + " : " + self.flavor_name + " : " + self.deploymentProfile
-        + " : " + str(self.vmCount) + " : " + self.vmt_url + " : " + self.auth[0] + " : " + self.auth[1] + " : " + self.scheduler_hint)
+        + " : " + str(self.vmCount) + " : " + self.vmt_url + " : " + self.auth[0] + " : " + self.auth[1] + " : " + str(self.scheduler_hint))
         self.host_array[:] = []
         try:
             self.templateName = self.getTemplateFromUuid(self.flavor_name, self.deploymentProfile)
