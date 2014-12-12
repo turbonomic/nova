@@ -129,7 +129,7 @@ class VMTScheduler(driver.Scheduler):
             LOG.info('scheduler_hints not present in filter_properties')
 
 
-        LOG.info(self.reservationName + " : " + self.vmPrefix + " : " + self.flavor_name + " : " + self.deploymentProfile
+        LOG.info(self.reservationName + " : " + self.vmPrefix + " : " + self.flavor_name + " : " + str(self.deploymentProfile)
         + " : " + str(self.vmCount) + " : " + self.vmt_url + " : " + self.auth[0] + " : " + self.auth[1] + " : " + str(self.scheduler_hint))
         self.host_array[:] = []
         try:
@@ -207,13 +207,19 @@ class VMTScheduler(driver.Scheduler):
         return status
 
     def getTemplateFromUuid(self, flavor_name, service_uuid):
-        LOG.info("Getting template uuid for serviceUuid: " + service_uuid)
+        #LOG.info("Getting template uuid for serviceUuid: " + service_uuid)
         all_templates_xml = self.apiGet("/templates")
         for xml_line in all_templates_xml:
-            if ((self.parseField("displayName", xml_line).endswith("::TMP-" + flavor_name)) &
-                (service_uuid in self.parseField("services", xml_line))):
-                templateUuid = self.parseField("uuid", xml_line)
-                break
+            if ((self.parseField("displayName", xml_line).endswith("::TMP-" + flavor_name))):
+                if service_uuid is None:
+                    templateUuid = self.parseField("uuid", xml_line)
+                    tempDeploy = self.parseField("services", xml_line)
+                    self.deploymentProfile = tempDeploy[0:36]
+                    break
+                else:
+                    if service_uuid in self.parseField("services", xml_line):
+                        templateUuid = self.parseField("uuid", xml_line)
+                        break
         else:
             LOG.info("Reservation was not found by uuid in all reservations xml.")
             templateUuid = ""
