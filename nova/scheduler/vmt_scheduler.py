@@ -76,6 +76,7 @@ class VMTScheduler(driver.Scheduler):
         self.vmt_url = 'http://' + CONF.vmturbo_rest_uri + "/vmturbo/api"
         self.auth = (CONF.vmturbo_username, CONF.vmturbo_password)
         self.host_array = []
+        self.placementFailed = False 
 
     def _schedule(self, context, topic, request_spec, filter_properties):
         """Picks a host that is up at random."""
@@ -90,8 +91,11 @@ class VMTScheduler(driver.Scheduler):
                 host = random.choice(hosts)
                 LOG.info('Host selected by VMTurbo is not available for service. Selecting random host ' + host)
         else:
-            host = random.choice(hosts)
-            LOG.info('OpsMgr failed to schedule, Check OpsMgr logs for reason. Selecting random host ' + host)
+            if self.placementFailed:
+                LOG.info('Not enough reource for placing the workload, check OpsMgr for reason')
+            else:
+                host = random.choice(hosts)
+                LOG.info('ERROR happens when OpsMgr trying to schedule, choose a random host' + host)
         return host
  
     def select_destinations(self, context, request_spec, filter_properties):
@@ -153,7 +157,11 @@ class VMTScheduler(driver.Scheduler):
                                       request_spec, filter_properties)
                 updated_instance = driver.instance_update_db(context,
                         instance_uuid)
-                self.compute_rpcapi.run_instance(context,
+                if self.placementFailed:
+                    reason = _('There are not enough resource available.')
+                    raise exception.NoValidHost(reason=reason)
+                else:
+                    self.compute_rpcapi.run_instance(context,
                         instance=updated_instance, host=host,
                         requested_networks=requested_networks,
                         injected_files=injected_files,
@@ -238,6 +246,10 @@ class VMTScheduler(driver.Scheduler):
         if (statusRes == "PLACEMENT_SUCCEEDED"):
             LOG.info("Placement with uuid " + reservationUuid + " succeeded")
             self.populateResourceList(reservationUuid)
+        elif (statusRes == "PLACEMENT_FAILED"):
+            LOG.warn("Placement with uuid " + reservationUuid + " failed to be placed")
+            self.host_array = []
+            self.placementFailed = True 
         else:
             LOG.warn("Placement with uuid " + reservationUuid + " could not be placed")
             self.host_array = []
