@@ -112,7 +112,7 @@ class VMTScheduler(driver.Scheduler):
         """Create and run an instance or instances."""
         LOG.info("Running schedule_run_instance for the VMTurboScheduler")
         instance_uuids = request_spec.get('instance_uuids')
-
+        self.placementFailed = False
         self.reservationName = request_spec.get('instance_properties').get('display_name')#"From Response - Name"
         self.vmPrefix = "VMTReservation"#"From Response - Create Something"
         self.flavor_name = request_spec.get('instance_type').get('name')#filter_properties['name']#"From Response - m1.tiny"
