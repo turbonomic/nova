@@ -84,18 +84,20 @@ class VMTScheduler(driver.Scheduler):
         hosts = self.hosts_up(elevated, topic)
         host = ''
         if self.host_array:
-            host = self.host_array.pop()
+            #When there's affinity rule, we don't do pop because there's only one host returned from VMT, regardless of how many instances requested
+            if self.isSchedulerHintPresent and len(host_array) == 1:
+                host = self.host_array[0]
+            else:
+                host = self.host_array.pop()
             if host in hosts:
                 LOG.info('Host selected by VMTurbo ' + host)
             else:
-                host = random.choice(hosts)
-                LOG.info('Host selected by VMTurbo is not available for service. Selecting random host ' + host)
+                LOG.info('Host selected by VMTurbo is not up' + host)
         else:
             if self.placementFailed:
                 LOG.info('Not enough reource for placing the workload, check OpsMgr for reason')
             else:
-                host = random.choice(hosts)
-                LOG.info('ERROR happens when OpsMgr trying to schedule, choose a random host' + host)
+                LOG.info('ERROR happens when OpsMgr trying to schedule, Please try again later')
         return host
  
     def select_destinations(self, context, request_spec, filter_properties):
