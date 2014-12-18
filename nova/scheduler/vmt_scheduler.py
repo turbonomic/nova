@@ -85,7 +85,7 @@ class VMTScheduler(driver.Scheduler):
         host = ''
         if self.host_array:
             #When there's affinity rule, we don't do pop because there's only one host returned from VMT, regardless of how many instances requested
-            if self.isSchedulerHintPresent and len(host_array) == 1:
+            if self.isSchedulerHintPresent and len(self.host_array) == 1:
                 host = self.host_array[0]
             else:
                 host = self.host_array.pop()
@@ -93,6 +93,7 @@ class VMTScheduler(driver.Scheduler):
                 LOG.info('Host selected by VMTurbo ' + host)
             else:
                 LOG.info('Host selected by VMTurbo is not up' + host)
+                self.placementFailed = True
         else:
             if self.placementFailed:
                 LOG.info('Not enough reource for placing the workload, check OpsMgr for reason')
