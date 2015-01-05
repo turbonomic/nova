@@ -185,6 +185,7 @@ class VMTScheduler(driver.Scheduler):
         """ Deploy date is always today """
         formatDate = "%Y-%m-%d %H:%M:%S"
         deployDate = datetime.date.today().strftime(formatDate)
+        reservationDate = deployDate
         LOG.info("Creating reservation: " + self.reservationName + ". "
                        + "vmPrefix: " + self.vmPrefix + ". "
                        + "templateName: " + self.templateName + ". "
@@ -198,6 +199,7 @@ class VMTScheduler(driver.Scheduler):
         requests_data_dict.update({ "count" : str(self.vmCount) })
         requests_data_dict.update({ "deploymentProfile" : self.deploymentProfile })
         requests_data_dict.update({ "deployDate" : deployDate })
+        requests_data_dict.update({ "reservationDate" : reservationDate })
         if isSchedulerHintPresent:
             requests_data_dict.update({ "segmentationUuid[]" : self.scheduler_hint })
         reservation_uuid = self.apiPost("/reservations", requests_data_dict)
@@ -240,7 +242,7 @@ class VMTScheduler(driver.Scheduler):
         statusRes = self.getPlacementStatus(reservationUuid)
         count = 0
         """ Setting the timeout to 5 mintues """
-        while (statusRes == "LOADING"):
+        while (statusRes == "LOADING" or statusRes == "UNFULFILLED"):
             ++count
             statusRes = self.getPlacementStatus(reservationUuid)
             time.sleep(2)
