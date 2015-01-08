@@ -96,15 +96,23 @@ class VMTScheduler(driver.Scheduler):
                 self.placementFailed = True
         else:
             if self.placementFailed:
-                LOG.info('Not enough reource for placing the workload, check OpsMgr for reason')
+                LOG.info('Not enough resources for placing the workload, check OpsMgr for reason')
             else:
                 LOG.info('ERROR happens when OpsMgr trying to schedule, Please try again later')
         return host
  
     def select_destinations(self, context, request_spec, filter_properties):
         """Selects random destinations."""
+        LOG.info("select_destinations overridden in VMTScheduler")
         num_instances = request_spec['num_instances']
-        Log.info("select_destinations overridden in VMTScheduler")
+        instance_uuids = request_spec.get('instance_uuids')
+#         selected_hosts = self._schedule(context, CONF.compute_topic,
+#                                         request_spec, filter_properties)
+#         if self.placementFailed:
+#             reason = _('There are not enough resources available.')
+#             raise exception.NoValidHost(reason=reason)
+#         dests = [dict(host=host.obj.host, nodename=host.obj.nodename,
+#                       limits=host.obj.limits) for host in selected_hosts]
         dests = []
         return dests
  
@@ -161,7 +169,7 @@ class VMTScheduler(driver.Scheduler):
                 updated_instance = driver.instance_update_db(context,
                         instance_uuid)
                 if self.placementFailed:
-                    reason = _('There are not enough resource available.')
+                    reason = _('There are not enough resources available.')
                     raise exception.NoValidHost(reason=reason)
                 else:
                     self.compute_rpcapi.run_instance(context,
