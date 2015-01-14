@@ -99,7 +99,11 @@ class VMTScheduler(driver.Scheduler):
                 LOG.info('Not enough reource for placing the workload, check OpsMgr for reason')
             else:
                 LOG.info('ERROR happens when OpsMgr trying to schedule, Please try again later')
-        return host
+        if self.forceHost:
+            LOG.info('User specify the host: ' + str(self.forceHost))
+            return self.forceHost
+        else:
+            return host
  
     def select_destinations(self, context, request_spec, filter_properties):
         """Selects random destinations."""
@@ -123,6 +127,7 @@ class VMTScheduler(driver.Scheduler):
         self.vmCount = request_spec.get('num_instances')#"From response"
         self.scheduler_hint = ''
         self.isSchedulerHintPresent = False
+        self.forceHost = ''
         if 'scheduler_hints' in filter_properties:
             if 'group' in filter_properties['scheduler_hints']:
                 self.scheduler_hint = filter_properties['scheduler_hints']['group']
@@ -134,8 +139,10 @@ class VMTScheduler(driver.Scheduler):
                 LOG.info('group not found in filter_properties[\'scheduler_hints\']')
         else:
             LOG.info('scheduler_hints not present in filter_properties')
-
-
+        if 'force_hosts' in filter_properties:
+            self.forceHost = filter_properties.get('force_hosts')[0]
+        else:
+            LOG.info('No Force Host in filter_properties')
         LOG.info(self.reservationName + " : " + self.vmPrefix + " : " + self.flavor_name + " : " + str(self.deploymentProfile)
         + " : " + str(self.vmCount) + " : " + self.vmt_url + " : " + self.auth[0] + " : " + self.auth[1] + " : " + str(self.scheduler_hint))
         self.host_array[:] = []
@@ -160,7 +167,7 @@ class VMTScheduler(driver.Scheduler):
                                       request_spec, filter_properties)
                 updated_instance = driver.instance_update_db(context,
                         instance_uuid)
-                if self.placementFailed:
+                if self.placementFailed and "" == self.forceHost:
                     reason = _('There are not enough resource available.')
                     raise exception.NoValidHost(reason=reason)
                 else:
