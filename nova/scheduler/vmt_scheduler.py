@@ -99,11 +99,7 @@ class VMTScheduler(driver.Scheduler):
                 LOG.info('Not enough resources for placing the workload, check OpsMgr for reason')
             else:
                 LOG.info('ERROR happens when OpsMgr trying to schedule, Please try again later')
-        if self.forceHost:
-            LOG.info('User specify the host: ' + str(self.forceHost))
-            return self.forceHost
-        else:
-            return host
+        return host
  
     def select_destinations(self, context, request_spec, filter_properties):
         """Selects random destinations."""
@@ -154,25 +150,30 @@ class VMTScheduler(driver.Scheduler):
         LOG.info(self.reservationName + " : " + self.vmPrefix + " : " + self.flavor_name + " : " + str(self.deploymentProfile)
         + " : " + str(self.vmCount) + " : " + self.vmt_url + " : " + self.auth[0] + " : " + self.auth[1] + " : " + str(self.scheduler_hint))
         self.host_array[:] = []
-        try:
-            self.templateName = self.getTemplateFromUuid(self.flavor_name, self.deploymentProfile)
-            reservationUuid = self.requestPlacement(self.isSchedulerHintPresent)
-            if "ERROR" != reservationUuid and "" != reservationUuid and reservationUuid is not None:
-                LOG.info("Template UUID " + self.templateName + " : Reservation UUID " + reservationUuid)
-                self.pollForStatus(reservationUuid)
-                self.deletePlacement(reservationUuid)
-        except:
-            e = sys.exc_info()[0]
-            type, value, tb = sys.exc_info()
-            LOG.info('ERROR when getting responses from VMTurbo ')
-            LOG.info(value.message)
-        LOG.info('Hosts fetched from VMTurbo')
-        LOG.info(self.host_array)
+        if '' == self.forceHost:
+            try:
+                self.templateName = self.getTemplateFromUuid(self.flavor_name, self.deploymentProfile)
+                reservationUuid = self.requestPlacement(self.isSchedulerHintPresent)
+                if "ERROR" != reservationUuid and "" != reservationUuid and reservationUuid is not None:
+                    LOG.info("Template UUID " + self.templateName + " : Reservation UUID " + reservationUuid)
+                    self.pollForStatus(reservationUuid)
+                    self.deletePlacement(reservationUuid)
+            except:
+                e = sys.exc_info()[0]
+                type, value, tb = sys.exc_info()
+                LOG.info('ERROR when getting responses from VMTurbo ')
+                LOG.info(value.message)
+            LOG.info('Hosts fetched from VMTurbo')
+            LOG.info(self.host_array)
         for num, instance_uuid in enumerate(instance_uuids):
             request_spec['instance_properties']['launch_index'] = num
             try:
-                host = self._schedule(context, CONF.compute_topic,
+                if '' == self.forceHost:
+                    host = self._schedule(context, CONF.compute_topic,
                                       request_spec, filter_properties)
+                else:
+                    LOG.info('User specify the host: ' + str(self.forceHost))
+                    host = self.forceHost
                 updated_instance = driver.instance_update_db(context,
                         instance_uuid)
                 if self.placementFailed and "" == self.forceHost:
