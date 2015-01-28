@@ -198,24 +198,17 @@ class VMTScheduler(driver.Scheduler):
     """ external systems can be used for scheduling tasks """
 
     def requestPlacement(self, isSchedulerHintPresent):
-        """ Deploy date is always today """
-        formatDate = "%Y-%m-%d %H:%M:%S"
-        deployDate = datetime.date.today().strftime(formatDate)
-        reservationDate = deployDate
         LOG.info("Creating reservation: " + self.reservationName + ". "
                        + "vmPrefix: " + self.vmPrefix + ". "
                        + "templateName: " + self.templateName + ". "
                        + "deploymentProfile: " + self.deploymentProfile + ". "
-                       + "count: " + str(self.vmCount) + ". "
-                       + "deployDate: " + deployDate + ".")
+                       + "count: " + str(self.vmCount) + ". ")
         requests_data_dict = dict()
         requests_data_dict.update({ "vmPrefix" : self.vmPrefix })
         requests_data_dict.update({ "reservationName" : self.reservationName })
         requests_data_dict.update({ "templateName" : self.templateName })
         requests_data_dict.update({ "count" : str(self.vmCount) })
         requests_data_dict.update({ "deploymentProfile" : self.deploymentProfile })
-        requests_data_dict.update({ "deployDate" : deployDate })
-        requests_data_dict.update({ "reservationDate" : reservationDate })
         if isSchedulerHintPresent:
             requests_data_dict.update({ "segmentationUuid[]" : self.scheduler_hint })
         reservation_uuid = self.apiPost("/reservations", requests_data_dict)
