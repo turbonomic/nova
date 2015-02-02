@@ -180,15 +180,19 @@ class VMTScheduler(driver.Scheduler):
                     reason = _('There are not enough resources available.')
                     raise exception.NoValidHost(reason=reason)
                 else:
-                    self.compute_rpcapi.run_instance(context,
-                        instance=updated_instance, host=host,
-                        requested_networks=requested_networks,
-                        injected_files=injected_files,
-                        admin_password=admin_password,
-                        is_first_time=is_first_time,
-                        request_spec=request_spec,
-                        filter_properties=filter_properties,
-                        legacy_bdm_in_spec=legacy_bdm_in_spec)
+                	if "" == host:
+                		reason = _('Failed to schedule, please try again later.')
+                    	raise exception.NoValidHost(reason=reason)
+                    else:
+                    	self.compute_rpcapi.run_instance(context,
+                        	instance=updated_instance, host=host,
+                        	requested_networks=requested_networks,
+                        	injected_files=injected_files,
+                        	admin_password=admin_password,
+                        	is_first_time=is_first_time,
+                        	request_spec=request_spec,
+                        	filter_properties=filter_properties,
+                        	legacy_bdm_in_spec=legacy_bdm_in_spec)
             except Exception as ex:
                 driver.handle_schedule_error(context, ex, instance_uuid,
                                              request_spec)
