@@ -182,7 +182,7 @@ class VMTScheduler(driver.Scheduler):
                 else:
                 	if "" == host:
                 		reason = _('Failed to schedule, please try again later.')
-                    	raise exception.NoValidHost(reason=reason)
+                    		raise exception.NoValidHost(reason=reason)
                     	else:
                     		self.compute_rpcapi.run_instance(context,
                         	instance=updated_instance, host=host,
