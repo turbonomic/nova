@@ -13,10 +13,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import fixtures
+import contextlib
 import os
 import time
 
+import fixtures
+import mock
 from oslo.config import cfg
 
 from nova import exception
@@ -237,6 +239,12 @@ class LibvirtVolumeTestCase(test.NoDBTestCase):
                         }
                 }
         }
+
+    def test_rescan_multipath(self):
+        libvirt_driver = volume.LibvirtISCSIVolumeDriver(self.fake_conn)
+        libvirt_driver._rescan_multipath()
+        expected_multipath_cmd = ('multipath', '-r')
+        self.assertIn(expected_multipath_cmd, self.executes)
 
     def test_libvirt_iscsi_driver(self):
         # NOTE(vish) exists is to make driver assume connecting worked
@@ -480,6 +488,9 @@ class LibvirtVolumeTestCase(test.NoDBTestCase):
         connection_info['data']['device_path'] = mpdev_filepath
         target_portals = ['fake_portal1', 'fake_portal2']
         libvirt_driver._get_multipath_device_name = lambda x: mpdev_filepath
+        iscsi_devs = ['ip-%s-iscsi-%s-lun-0' % (self.location, self.iqn)]
+        self.stubs.Set(libvirt_driver, '_get_iscsi_devices',
+                       lambda: iscsi_devs)
         self.stubs.Set(libvirt_driver,
                        '_get_target_portals_from_iscsiadm_output',
                        lambda x: [[self.location, self.iqn]])
@@ -490,6 +501,46 @@ class LibvirtVolumeTestCase(test.NoDBTestCase):
         libvirt_driver.disconnect_volume(connection_info, 'vde')
         expected_multipath_cmd = ('multipath', '-f', 'foo')
         self.assertIn(expected_multipath_cmd, self.executes)
+
+    def test_libvirt_kvm_volume_with_multipath_connecting(self):
+        libvirt_driver = volume.LibvirtISCSIVolumeDriver(self.fake_conn)
+        ip_iqns = [[self.location, self.iqn],
+                   ['10.0.2.16:3260', self.iqn],
+                   [self.location,
+                    'iqn.2010-10.org.openstack:volume-00000002']]
+
+        with contextlib.nested(
+            mock.patch.object(os.path, 'exists', return_value=True),
+            mock.patch.object(libvirt_driver, '_run_iscsiadm_bare'),
+            mock.patch.object(libvirt_driver,
+                              '_get_target_portals_from_iscsiadm_output',
+                              return_value=ip_iqns),
+            mock.patch.object(libvirt_driver, '_connect_to_iscsi_portal'),
+            mock.patch.object(libvirt_driver, '_rescan_iscsi'),
+            mock.patch.object(libvirt_driver, '_get_host_device',
+                              return_value='fake-device'),
+            mock.patch.object(libvirt_driver, '_rescan_multipath'),
+            mock.patch.object(libvirt_driver, '_get_multipath_device_name',
+                              return_value='/dev/mapper/fake-mpath-devname')
+        ) as (mock_exists, mock_run_iscsiadm_bare, mock_get_portals,
+              mock_connect_iscsi, mock_rescan_iscsi, mock_host_device,
+              mock_rescan_multipath, mock_device_name):
+            vol = {'id': 1, 'name': self.name}
+            connection_info = self.iscsi_connection(vol, self.location,
+                                                    self.iqn)
+            libvirt_driver.use_multipath = True
+            libvirt_driver.connect_volume(connection_info, self.disk_info)
+
+            # Verify that the supplied iqn is used when it shares the same
+            # iqn between multiple portals.
+            connection_info = self.iscsi_connection(vol, self.location,
+                                                    self.iqn)
+            props1 = connection_info['data'].copy()
+            props2 = connection_info['data'].copy()
+            props2['target_portal'] = '10.0.2.16:3260'
+            expected_calls = [mock.call(props1), mock.call(props2),
+                              mock.call(props1)]
+            self.assertEqual(expected_calls, mock_connect_iscsi.call_args_list)
 
     def test_libvirt_kvm_volume_with_multipath_still_in_use(self):
         name = 'volume-00000001'
@@ -540,6 +591,66 @@ class LibvirtVolumeTestCase(test.NoDBTestCase):
         self.mox.ReplayAll()
         libvirt_driver.disconnect_volume(connection_info, 'vde')
 
+    def test_libvirt_kvm_volume_with_multipath_disconnected(self):
+        libvirt_driver = volume.LibvirtISCSIVolumeDriver(self.fake_conn)
+        volumes = [{'name': self.name,
+                    'location': self.location,
+                    'iqn': self.iqn,
+                    'mpdev_filepath': '/dev/mapper/disconnect'},
+                   {'name': 'volume-00000002',
+                    'location': '10.0.2.15:3260',
+                    'iqn': 'iqn.2010-10.org.openstack:volume-00000002',
+                    'mpdev_filepath': '/dev/mapper/donotdisconnect'}]
+        iscsi_devs = ['ip-%s-iscsi-%s-lun-1' % (volumes[0]['location'],
+                                                volumes[0]['iqn']),
+                      'ip-%s-iscsi-%s-lun-1' % (volumes[1]['location'],
+                                                volumes[1]['iqn'])]
+
+        def _get_multipath_device_name(path):
+            if '%s-lun-1' % volumes[0]['iqn'] in path:
+                return volumes[0]['mpdev_filepath']
+            else:
+                return volumes[1]['mpdev_filepath']
+
+        def _get_multipath_iqn(mpdev):
+            if volumes[0]['mpdev_filepath'] == mpdev:
+                return volumes[0]['iqn']
+            else:
+                return volumes[1]['iqn']
+
+        with contextlib.nested(
+            mock.patch.object(os.path, 'exists', return_value=True),
+            mock.patch.object(self.fake_conn, 'get_all_block_devices',
+                              retrun_value=[volumes[1]['mpdev_filepath']]),
+            mock.patch.object(libvirt_driver, '_get_multipath_device_name',
+                              _get_multipath_device_name),
+            mock.patch.object(libvirt_driver, '_get_multipath_iqn',
+                              _get_multipath_iqn),
+            mock.patch.object(libvirt_driver, '_get_iscsi_devices',
+                              return_value=iscsi_devs),
+            mock.patch.object(libvirt_driver,
+                              '_get_target_portals_from_iscsiadm_output',
+                              return_value=[[volumes[0]['location'],
+                                             volumes[0]['iqn']],
+                                            [volumes[1]['location'],
+                                             volumes[1]['iqn']]]),
+            mock.patch.object(libvirt_driver, '_disconnect_mpath')
+        ) as (mock_exists, mock_devices, mock_device_name, mock_get_iqn,
+              mock_iscsi_devices, mock_get_portals, mock_disconnect_mpath):
+            vol = {'id': 1, 'name': volumes[0]['name']}
+            connection_info = self.iscsi_connection(vol,
+                                                    volumes[0]['location'],
+                                                    volumes[0]['iqn'])
+            connection_info['data']['device_path'] =\
+                                            volumes[0]['mpdev_filepath']
+            libvirt_driver.use_multipath = True
+            libvirt_driver.disconnect_volume(connection_info, 'vde')
+            # Ensure that the mpath device is disconnected.
+            ips_iqns = []
+            ips_iqns.append([volumes[0]['location'], volumes[0]['iqn']])
+            mock_disconnect_mpath.assert_called_once_with(
+                connection_info['data'], ips_iqns)
+
     def test_libvirt_kvm_volume_with_multipath_getmpdev(self):
         self.flags(iscsi_use_multipath=True, group='libvirt')
         self.stubs.Set(os.path, 'exists', lambda x: True)
@@ -585,6 +696,9 @@ class LibvirtVolumeTestCase(test.NoDBTestCase):
             }
         target_portals = ['fake_portal1', 'fake_portal2']
         libvirt_driver._get_multipath_device_name = lambda x: mpdev_filepath
+        iscsi_devs = ['ip-%s-iscsi-%s-lun-0' % (location, iqn)]
+        self.stubs.Set(libvirt_driver, '_get_iscsi_devices',
+                       lambda: iscsi_devs)
         self.stubs.Set(libvirt_driver,
                        '_get_target_portals_from_iscsiadm_output',
                        lambda x: [[location, iqn]])

@@ -1590,6 +1590,13 @@ def instance_create(context, values):
     context - request context object
     values - dict containing column values.
     """
+
+    # NOTE(rpodolyaka): create the default security group, if it doesn't exist.
+    # This must be done in a separate transaction, so that this one is not
+    # aborted in case a concurrent one succeeds first and the unique constraint
+    # for security group names is violated by a concurrent INSERT
+    security_group_ensure_default(context)
+
     values = values.copy()
     values['metadata'] = _metadata_refs(
             values.get('metadata'), models.InstanceMetadata)
@@ -1610,7 +1617,7 @@ def instance_create(context, values):
 
     def _get_sec_group_models(session, security_groups):
         models = []
-        default_group = security_group_ensure_default(context)
+        default_group = _security_group_ensure_default(context, session)
         if 'default' in security_groups:
             models.append(default_group)
             # Generate a new list, so we don't modify the original
@@ -3750,8 +3757,21 @@ def security_group_update(context, security_group_id, values,
 
 def security_group_ensure_default(context):
     """Ensure default security group exists for a project_id."""
-    session = get_session()
-    with session.begin():
+
+    try:
+        return _security_group_ensure_default(context)
+    except exception.SecurityGroupExists:
+        # NOTE(rpodolyaka): a concurrent transaction has succeeded first,
+        # suppress the error and proceed
+        return security_group_get_by_name(context, context.project_id,
+                                          'default')
+
+
+def _security_group_ensure_default(context, session=None):
+    if session is None:
+        session = get_session()
+
+    with session.begin(subtransactions=True):
         try:
             default_group = _security_group_get_by_names(context,
                                                          session,

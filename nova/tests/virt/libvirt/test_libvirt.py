@@ -1445,7 +1445,8 @@ class LibvirtConnTestCase(test.TestCase):
 
         self.assertEqual("none", cfg.devices[7].action)
 
-    def test_get_guest_config_with_watchdog_action_through_flavor(self):
+    def _test_get_guest_config_with_watchdog_action_flavor(self,
+            hw_watchdog_action="hw:watchdog_action"):
         self.flags(virt_type='kvm', group='libvirt')
 
         conn = libvirt_driver.LibvirtDriver(fake.FakeVirtAPI(), True)
@@ -1455,7 +1456,7 @@ class LibvirtConnTestCase(test.TestCase):
         db.flavor_extra_specs_update_or_create(
                 self.context,
                 flavor['flavorid'],
-                {'hw_watchdog_action': 'none'})
+                {hw_watchdog_action: 'none'})
 
         instance_ref = db.instance_create(self.context, self.test_instance)
 
@@ -1466,7 +1467,7 @@ class LibvirtConnTestCase(test.TestCase):
 
         db.flavor_extra_specs_delete(self.context,
                                      flavor['flavorid'],
-                                     'hw_watchdog_action')
+                                     hw_watchdog_action)
 
         self.assertEqual(8, len(cfg.devices))
         self.assertIsInstance(cfg.devices[0],
@@ -1487,6 +1488,16 @@ class LibvirtConnTestCase(test.TestCase):
                               vconfig.LibvirtConfigGuestWatchdog)
 
         self.assertEqual("none", cfg.devices[7].action)
+
+    def test_get_guest_config_with_watchdog_action_through_flavor(self):
+        self._test_get_guest_config_with_watchdog_action_flavor()
+
+    # TODO(pkholkin): the test accepting old property name 'hw_watchdog_action'
+    #                should be removed in L release
+    def test_get_guest_config_with_watchdog_action_through_flavor_no_scope(
+            self):
+        self._test_get_guest_config_with_watchdog_action_flavor(
+            hw_watchdog_action="hw_watchdog_action")
 
     def test_get_guest_config_with_watchdog_action_meta_overrides_flavor(self):
         self.flags(virt_type='kvm', group='libvirt')
@@ -4007,7 +4018,7 @@ class LibvirtConnTestCase(test.TestCase):
         self.mox.StubOutWithMock(conn, "_assert_dest_node_has_enough_disk")
         conn._assert_dest_node_has_enough_disk(
             self.context, instance_ref, dest_check_data['disk_available_mb'],
-            False)
+            False, None)
 
         self.mox.ReplayAll()
         conn.check_can_live_migrate_source(self.context, instance_ref,
@@ -4113,7 +4124,8 @@ class LibvirtConnTestCase(test.TestCase):
         self.mox.StubOutWithMock(conn, "get_instance_disk_info")
         conn.get_instance_disk_info(instance_ref["name"]).AndReturn(
                                             '[{"virt_disk_size":2}]')
-        conn.get_instance_disk_info(instance_ref["name"]).AndReturn(
+        conn.get_instance_disk_info(instance_ref["name"],
+                                    block_device_info=None).AndReturn(
                                             '[{"virt_disk_size":2}]')
 
         dest_check_data = {"filename": "file",
@@ -7470,18 +7482,33 @@ class NWFilterFakes:
 
     def filterDefineXMLMock(self, xml):
         class FakeNWFilterInternal:
-            def __init__(self, parent, name, xml):
+            def __init__(self, parent, name, u, xml):
                 self.name = name
+                self.uuid = u
                 self.parent = parent
                 self.xml = xml
 
+            def XMLDesc(self, flags):
+                return self.xml
+
             def undefine(self):
                 del self.parent.filters[self.name]
-                pass
+
         tree = etree.fromstring(xml)
         name = tree.get('name')
+        u = tree.find('uuid')
+        if u is None:
+            u = uuid.uuid4().hex
+        else:
+            u = u.text
         if name not in self.filters:
-            self.filters[name] = FakeNWFilterInternal(self, name, xml)
+            self.filters[name] = FakeNWFilterInternal(self, name, u, xml)
+        else:
+            if self.filters[name].uuid != u:
+                raise libvirt.libvirtError(
+                    "Mismatching name '%s' with uuid '%s' vs '%s'"
+                    % (name, self.filters[name].uuid, u))
+            self.filters[name].xml = xml
         return True
 
 
@@ -8021,6 +8048,26 @@ class NWFilterTestCase(test.TestCase):
         self.assertEqual(original_filter_count - len(fakefilter.filters), 1)
 
         db.instance_destroy(admin_ctxt, instance_ref['uuid'])
+
+    def test_redefining_nwfilters(self):
+        fakefilter = NWFilterFakes()
+        self.fw._conn.nwfilterDefineXML = fakefilter.filterDefineXMLMock
+        self.fw._conn.nwfilterLookupByName = fakefilter.nwfilterLookupByName
+
+        instance_ref = self._create_instance()
+        inst_id = instance_ref['id']
+        inst_uuid = instance_ref['uuid']
+
+        self.security_group = self.setup_and_return_security_group()
+
+        db.instance_add_security_group(self.context, inst_uuid,
+                                       self.security_group['id'])
+
+        instance = db.instance_get(self.context, inst_id)
+
+        network_info = _fake_network_info(self.stubs, 1)
+        self.fw.setup_basic_filtering(instance, network_info)
+        self.fw.setup_basic_filtering(instance, network_info)
 
     def test_nwfilter_parameters(self):
         admin_ctxt = context.get_admin_context()

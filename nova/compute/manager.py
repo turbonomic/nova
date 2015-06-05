@@ -274,12 +274,21 @@ def reverts_task_state(function):
                 LOG.info(_("Task possibly preempted: %s") % e.format_message())
         except Exception:
             with excutils.save_and_reraise_exception():
+                wrapped_func = utils.get_wrapped_function(function)
+                keyed_args = safe_utils.getcallargs(wrapped_func, context,
+                                                    *args, **kwargs)
+                # NOTE(mriedem): 'instance' must be in keyed_args because we
+                # have utils.expects_func_args('instance') decorating this
+                # method.
+                instance_uuid = keyed_args['instance']['uuid']
                 try:
                     self._instance_update(context,
-                                          kwargs['instance']['uuid'],
+                                          instance_uuid,
                                           task_state=None)
-                except Exception:
-                    pass
+                except Exception as e:
+                    msg = _("Failed to revert task state for instance. "
+                            "Error: %s")
+                    LOG.warning(msg, e, instance_uuid=instance_uuid)
 
     return decorated_function
 
@@ -620,16 +629,21 @@ class ComputeManager(manager.Manager):
             self._resource_tracker_dict[nodename] = rt
         return rt
 
+    def _update_resource_tracker(self, context, instance):
+        """Let resource tracker know that instance has changed state."""
+
+        if (instance['host'] == self.host and
+                self.driver.node_is_available(instance['node'])):
+            rt = self._get_resource_tracker(instance.get('node'))
+            rt.update_usage(context, instance)
+
     def _instance_update(self, context, instance_uuid, **kwargs):
         """Update an instance in the database using kwargs as value."""
 
         instance_ref = self.conductor_api.instance_update(context,
                                                           instance_uuid,
                                                           **kwargs)
-        if (instance_ref['host'] == self.host and
-                self.driver.node_is_available(instance_ref['node'])):
-            rt = self._get_resource_tracker(instance_ref.get('node'))
-            rt.update_usage(context, instance_ref)
+        self._update_resource_tracker(context, instance_ref)
 
         return instance_ref
 
@@ -905,11 +919,43 @@ class ComputeManager(manager.Manager):
             instance.vm_state = vm_states.ACTIVE
             instance.save()
 
+        if instance.task_state == task_states.POWERING_OFF:
+            try:
+                LOG.debug(_("Instance in transitional state %s at start-up "
+                            "retrying stop request"),
+                            instance['task_state'], instance=instance)
+                self.stop_instance(context, instance)
+            except Exception:
+                # we don't want that an exception blocks the init_host
+                msg = _('Failed to stop instance')
+                LOG.exception(msg, instance=instance)
+            finally:
+                return
+
+        if instance.task_state == task_states.POWERING_ON:
+            try:
+                LOG.debug(_("Instance in transitional state %s at start-up "
+                            "retrying start request"),
+                            instance['task_state'], instance=instance)
+                self.start_instance(context, instance)
+            except Exception:
+                # we don't want that an exception blocks the init_host
+                msg = _('Failed to start instance')
+                LOG.exception(msg, instance=instance)
+            finally:
+                return
+
         net_info = compute_utils.get_nw_info_for_instance(instance)
         try:
             self.driver.plug_vifs(instance, net_info)
         except NotImplementedError as e:
             LOG.debug(e, instance=instance)
+        except exception.VirtualInterfacePlugException:
+            # we don't want an exception to block the init_host
+            LOG.exception(_("Vifs plug failed"), instance=instance)
+            self._set_instance_error_state(context, instance.uuid)
+            return
+
         if instance.task_state == task_states.RESIZE_MIGRATING:
             # We crashed during resize/migration, so roll back for safety
             try:
@@ -1845,7 +1891,6 @@ class ComputeManager(manager.Manager):
     # callers all pass objects already
     @wrap_exception()
     @reverts_task_state
-    @wrap_instance_event
     @wrap_instance_fault
     def build_and_run_instance(self, context, instance, image, request_spec,
                      filter_properties, admin_password=None,
@@ -1854,79 +1899,90 @@ class ComputeManager(manager.Manager):
                      node=None, limits=None):
 
         @utils.synchronized(instance.uuid)
-        def do_build_and_run_instance(context, instance, image, request_spec,
-                filter_properties, admin_password, injected_files,
-                requested_networks, security_groups, block_device_mapping,
-                node=None, limits=None):
+        def _locked_do_build_and_run_instance(*args, **kwargs):
+            self._do_build_and_run_instance(*args, **kwargs)
 
-            try:
-                LOG.audit(_('Starting instance...'), context=context,
+        # NOTE(danms): We spawn here to return the RPC worker thread back to
+        # the pool. Since what follows could take a really long time, we don't
+        # want to tie up RPC workers.
+        utils.spawn_n(_locked_do_build_and_run_instance,
+                      context, instance, image, request_spec,
+                      filter_properties, admin_password, injected_files,
+                      requested_networks, security_groups,
+                      block_device_mapping, node, limits)
+
+    @wrap_exception()
+    @reverts_task_state
+    @wrap_instance_event
+    @wrap_instance_fault
+    def _do_build_and_run_instance(self, context, instance, image,
+            request_spec, filter_properties, admin_password, injected_files,
+            requested_networks, security_groups, block_device_mapping,
+            node=None, limits=None):
+
+        try:
+            LOG.audit(_('Starting instance...'), context=context,
+                  instance=instance)
+            instance.vm_state = vm_states.BUILDING
+            instance.task_state = None
+            instance.save(expected_task_state=
+                    (task_states.SCHEDULING, None))
+        except exception.InstanceNotFound:
+            msg = _('Instance disappeared before build.')
+            LOG.debug(msg, instance=instance)
+            return
+        except exception.UnexpectedTaskStateError as e:
+            LOG.debug(e.format_message(), instance=instance)
+            return
+
+        # b64 decode the files to inject:
+        decoded_files = self._decode_files(injected_files)
+
+        if limits is None:
+            limits = {}
+
+        if node is None:
+            node = self.driver.get_available_nodes()[0]
+            LOG.debug(_('No node specified, defaulting to %s'), node,
                       instance=instance)
-                instance.vm_state = vm_states.BUILDING
-                instance.task_state = None
-                instance.save(expected_task_state=
-                        (task_states.SCHEDULING, None))
-            except exception.InstanceNotFound:
-                msg = _('Instance disappeared before build.')
-                LOG.debug(msg, instance=instance)
-                return
-            except exception.UnexpectedTaskStateError as e:
-                LOG.debug(e.format_message(), instance=instance)
-                return
 
-            # b64 decode the files to inject:
-            decoded_files = self._decode_files(injected_files)
-
-            if limits is None:
-                limits = {}
-
-            if node is None:
-                node = self.driver.get_available_nodes()[0]
-                LOG.debug(_('No node specified, defaulting to %s'), node,
-                          instance=instance)
-
-            try:
-                self._build_and_run_instance(context, instance, image,
-                        decoded_files, admin_password, requested_networks,
-                        security_groups, block_device_mapping, node, limits)
-            except exception.RescheduledException as e:
-                LOG.debug(e.format_message(), instance=instance)
-                # dhcp_options are per host, so if they're set we need to
-                # deallocate the networks and reallocate on the next host.
-                if self.driver.dhcp_options_for_instance(instance):
-                    self._cleanup_allocated_networks(context, instance,
-                            requested_networks)
-
-                instance.task_state = task_states.SCHEDULING
-                instance.save()
-
-                self.compute_task_api.build_instances(context, [instance],
-                        image, filter_properties, admin_password,
-                        injected_files, requested_networks, security_groups,
-                        block_device_mapping)
-            except (exception.InstanceNotFound,
-                    exception.UnexpectedDeletingTaskStateError):
-                msg = _('Instance disappeared during build.')
-                LOG.debug(msg, instance=instance)
+        try:
+            self._build_and_run_instance(context, instance, image,
+                    decoded_files, admin_password, requested_networks,
+                    security_groups, block_device_mapping, node, limits)
+        except exception.RescheduledException as e:
+            LOG.debug(e.format_message(), instance=instance)
+            # dhcp_options are per host, so if they're set we need to
+            # deallocate the networks and reallocate on the next host.
+            if self.driver.dhcp_options_for_instance(instance):
                 self._cleanup_allocated_networks(context, instance,
                         requested_networks)
-            except exception.BuildAbortException as e:
-                LOG.exception(e.format_message(), instance=instance)
-                self._cleanup_allocated_networks(context, instance,
-                        requested_networks)
-                self._set_instance_error_state(context, instance.uuid)
-            except Exception:
-                # Should not reach here.
-                msg = _('Unexpected build failure, not rescheduling build.')
-                LOG.exception(msg, instance=instance)
-                self._cleanup_allocated_networks(context, instance,
-                        requested_networks)
-                self._set_instance_error_state(context, instance.uuid)
 
-        do_build_and_run_instance(context, instance, image, request_spec,
-                filter_properties, admin_password, injected_files,
-                requested_networks, security_groups, block_device_mapping,
-                node, limits)
+            instance.task_state = task_states.SCHEDULING
+            instance.save()
+
+            self.compute_task_api.build_instances(context, [instance],
+                    image, filter_properties, admin_password,
+                    injected_files, requested_networks, security_groups,
+                    block_device_mapping)
+        except (exception.InstanceNotFound,
+                exception.UnexpectedDeletingTaskStateError):
+            msg = _('Instance disappeared during build.')
+            LOG.debug(msg, instance=instance)
+            self._cleanup_allocated_networks(context, instance,
+                    requested_networks)
+        except exception.BuildAbortException as e:
+            LOG.exception(e.format_message(), instance=instance)
+            self._cleanup_allocated_networks(context, instance,
+                    requested_networks)
+            self._set_instance_error_state(context, instance.uuid)
+        except Exception:
+            # Should not reach here.
+            msg = _('Unexpected build failure, not rescheduling build.')
+            LOG.exception(msg, instance=instance)
+            self._cleanup_allocated_networks(context, instance,
+                    requested_networks)
+            self._set_instance_error_state(context, instance.uuid)
 
     def _build_and_run_instance(self, context, instance, image, injected_files,
             admin_password, requested_networks, security_groups,
@@ -2243,6 +2299,7 @@ class ComputeManager(manager.Manager):
             instance.task_state = None
             instance.terminated_at = timeutils.utcnow()
             instance.save()
+            self._update_resource_tracker(context, instance)
             system_meta = utils.instance_sys_meta(instance)
             db_inst = self.conductor_api.instance_destroy(
                 context, obj_base.obj_to_primitive(instance))
@@ -4491,8 +4548,11 @@ class ComputeManager(manager.Manager):
         is_volume_backed = self.compute_api.is_volume_backed_instance(ctxt,
                                                                       instance)
         dest_check_data['is_volume_backed'] = is_volume_backed
+        block_device_info = self._get_instance_block_device_info(
+                            ctxt, instance, refresh_conn_info=True)
         return self.driver.check_can_live_migrate_source(ctxt, instance,
-                                                         dest_check_data)
+                                                         dest_check_data,
+                                                         block_device_info)
 
     @object_compat
     @wrap_exception()

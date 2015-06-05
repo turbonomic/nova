@@ -42,15 +42,11 @@ the Open Attestation project at:
     https://github.com/OpenAttestation/OpenAttestation
 """
 
-import httplib
-import socket
-import ssl
-
 from oslo.config import cfg
+import requests
 
 from nova import context
 from nova import db
-from nova.openstack.common.gettextutils import _
 from nova.openstack.common import jsonutils
 from nova.openstack.common import log as logging
 from nova.openstack.common import timeutils
@@ -74,43 +70,15 @@ trusted_opts = [
     cfg.IntOpt('attestation_auth_timeout',
                default=60,
                help='Attestation status cache valid period length'),
+    cfg.BoolOpt('attestation_insecure_ssl',
+                default=True,
+                help='Disable SSL cert verification for Attestation service')
 ]
 
 CONF = cfg.CONF
 trust_group = cfg.OptGroup(name='trusted_computing', title='Trust parameters')
 CONF.register_group(trust_group)
 CONF.register_opts(trusted_opts, group=trust_group)
-
-
-class HTTPSClientAuthConnection(httplib.HTTPSConnection):
-    """Class to make a HTTPS connection, with support for full client-based
-    SSL Authentication
-    """
-
-    def __init__(self, host, port, key_file, cert_file, ca_file, timeout=None):
-        httplib.HTTPSConnection.__init__(self, host,
-                                         key_file=key_file,
-                                         cert_file=cert_file)
-        self.host = host
-        self.port = port
-        self.key_file = key_file
-        self.cert_file = cert_file
-        self.ca_file = ca_file
-        self.timeout = timeout
-
-    def connect(self):
-        """Connect to a host on a given (SSL) port.
-        If ca_file is pointing somewhere, use it to check Server Certificate.
-
-        Redefined/copied and extended from httplib.py:1105 (Python 2.6.x).
-        This is needed to pass cert_reqs=ssl.CERT_REQUIRED as parameter to
-        ssl.wrap_socket(), which forces SSL to check server certificate
-        against our client certificate.
-        """
-        sock = socket.create_connection((self.host, self.port), self.timeout)
-        self.sock = ssl.wrap_socket(sock, self.key_file, self.cert_file,
-                                    ca_certs=self.ca_file,
-                                    cert_reqs=ssl.CERT_REQUIRED)
 
 
 class AttestationService(object):
@@ -125,29 +93,36 @@ class AttestationService(object):
         self.cert_file = None
         self.ca_file = CONF.trusted_computing.attestation_server_ca_file
         self.request_count = 100
+        # If the CA file is not provided, let's check the cert if verification
+        # asked
+        self.verify = (not CONF.trusted_computing.attestation_insecure_ssl
+                       and self.ca_file or True)
+        self.cert = (self.cert_file, self.key_file)
 
     def _do_request(self, method, action_url, body, headers):
         # Connects to the server and issues a request.
         # :returns: result data
         # :raises: IOError if the request fails
 
-        action_url = "%s/%s" % (self.api_url, action_url)
+        action_url = "https://%s:%s%s/%s" % (self.host, self.port,
+                                             self.api_url, action_url)
         try:
-            c = HTTPSClientAuthConnection(self.host, self.port,
-                                          key_file=self.key_file,
-                                          cert_file=self.cert_file,
-                                          ca_file=self.ca_file)
-            c.request(method, action_url, body, headers)
-            res = c.getresponse()
-            status_code = res.status
-            if status_code in (httplib.OK,
-                               httplib.CREATED,
-                               httplib.ACCEPTED,
-                               httplib.NO_CONTENT):
-                return httplib.OK, res
+            res = requests.request(method, action_url, data=body,
+                                   headers=headers, cert=self.cert,
+                                   verify=self.verify)
+            status_code = res.status_code
+            # pylint: disable=E1101
+            if status_code in (requests.codes.OK,
+                               requests.codes.CREATED,
+                               requests.codes.ACCEPTED,
+                               requests.codes.NO_CONTENT):
+                try:
+                    return requests.codes.OK, jsonutils.loads(res.text)
+                except (TypeError, ValueError):
+                    return requests.codes.OK, res.text
             return status_code, None
 
-        except (socket.error, IOError):
+        except requests.exceptions.RequestException:
             return IOError, None
 
     def _request(self, cmd, subcmd, hosts):
@@ -161,11 +136,7 @@ class AttestationService(object):
         if self.auth_blob:
             headers['x-auth-blob'] = self.auth_blob
         status, res = self._do_request(cmd, subcmd, cooked, headers)
-        if status == httplib.OK:
-            data = res.read()
-            return status, jsonutils.loads(data)
-        else:
-            return status, None
+        return status, res
 
     def do_attestation(self, hosts):
         """Attests compute nodes through OAT service.
@@ -203,11 +174,7 @@ class ComputeAttestationCache(object):
         # host in the first round that scheduler invokes us.
         computes = db.compute_node_get_all(admin)
         for compute in computes:
-            service = compute['service']
-            if not service:
-                LOG.warn(_("No service for compute ID %s") % compute['id'])
-                continue
-            host = service['host']
+            host = compute['hypervisor_hostname']
             self._init_cache_entry(host)
 
     def _cache_valid(self, host):
@@ -284,7 +251,7 @@ class TrustedFilter(filters.BaseHostFilter):
         instance = filter_properties.get('instance_type', {})
         extra = instance.get('extra_specs', {})
         trust = extra.get('trust:trusted_host')
-        host = host_state.host
+        host = host_state.nodename
         if trust:
             return self.compute_attestation.is_trusted(host, trust)
         return True
