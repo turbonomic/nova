@@ -75,59 +75,19 @@ class VMTScheduler(driver.Scheduler):
         self.compute_rpcapi = compute_rpcapi.ComputeAPI()
         self.vmt_url = 'http://' + CONF.vmturbo_rest_uri + "/vmturbo/api"
         self.auth = (CONF.vmturbo_username, CONF.vmturbo_password)
-        self.host_array = []
+        self.selected_hosts = []
         self.placementFailed = False 
 
     def _schedule(self, context, topic, request_spec, filter_properties):
-        """Picks a host that is up at random."""
-        elevated = context.elevated()
-        hosts = self.hosts_up(elevated, topic)
-        host = ''
-        if self.host_array:
-            #When there's affinity rule, we don't do pop because there's only one host returned from VMT, regardless of how many instances requested
-            if self.isSchedulerHintPresent and len(self.host_array) == 1:
-                host = self.host_array[0]
-            else:
-                host = self.host_array.pop()
-            if host in hosts:
-                LOG.info('Host selected by VMTurbo ' + host)
-            else:
-                LOG.info('Host selected by VMTurbo is not up' + host)
-                self.placementFailed = True
-        else:
-            if self.placementFailed:
-                LOG.info('Not enough resources for placing the workload, check OpsMgr for reason')
-            else:
-                LOG.info('ERROR happens when OpsMgr trying to schedule, Please try again later')
-        return host
- 
-    def select_destinations(self, context, request_spec, filter_properties):
-        """Selects random destinations."""
-        LOG.info("select_destinations overridden in VMTScheduler")
-        num_instances = request_spec['num_instances']
-        instance_uuids = request_spec.get('instance_uuids')
-#         selected_hosts = self._schedule(context, CONF.compute_topic,
-#                                         request_spec, filter_properties)
-#         if self.placementFailed:
-#             reason = _('There are not enough resources available.')
-#             raise exception.NoValidHost(reason=reason)
-#         dests = [dict(host=host.obj.host, nodename=host.obj.nodename,
-#                       limits=host.obj.limits) for host in selected_hosts]
-        dests = []
-        return dests
- 
-    def schedule_run_instance(self, context, request_spec,
-                              admin_password, injected_files,
-                              requested_networks, is_first_time,
-                              filter_properties, legacy_bdm_in_spec):
         """Create and run an instance or instances."""
-        LOG.info("Running schedule_run_instance for the VMTurboScheduler")
-        instance_uuids = request_spec.get('instance_uuids')
         self.placementFailed = False
         self.reservationName = request_spec.get('instance_properties').get('display_name')#"From Response - Name"
         self.vmPrefix = "VMTReservation"#"From Response - Create Something"
         self.flavor_name = request_spec.get('instance_type').get('name')#filter_properties['name']#"From Response - m1.tiny"
-        self.deploymentProfile = request_spec.get('block_device_mapping')[0].get('image_id')#"From the response - <uuid>"
+        if self.schedule:
+            self.deploymentProfile = request_spec.get('block_device_mapping')[0].get('image_id')#"From the response - <uuid>"
+        else:
+            self.deploymentProfile = request_spec.get('image').get('id')
         self.vmCount = request_spec.get('num_instances')#"From response"
         self.scheduler_hint = ''
         self.isSchedulerHintPresent = False
@@ -149,7 +109,7 @@ class VMTScheduler(driver.Scheduler):
             LOG.info('No Force Host in filter_properties')
         LOG.info(self.reservationName + " : " + self.vmPrefix + " : " + self.flavor_name + " : " + str(self.deploymentProfile)
         + " : " + str(self.vmCount) + " : " + self.vmt_url + " : " + self.auth[0] + " : " + self.auth[1] + " : " + str(self.scheduler_hint))
-        self.host_array[:] = []
+        self.selected_hosts[:] = []
         if '' == self.forceHost:
             try:
                 self.templateName = self.getTemplateFromUuid(self.flavor_name, self.deploymentProfile)
@@ -164,13 +124,60 @@ class VMTScheduler(driver.Scheduler):
                 LOG.info('ERROR when getting responses from VMTurbo ')
                 LOG.info(value.message)
             LOG.info('Hosts fetched from VMTurbo')
-            LOG.info(self.host_array)
+            LOG.info(self.selected_hosts)
+
+    def getHostFromList(self, context, topic):
+        """Picks a host that is up at random."""
+        elevated = context.elevated()
+        hosts = self.hosts_up(elevated, topic)
+        host = ''
+        if self.selected_hosts:
+            # When there's affinity rule, we don't do pop because there's only 
+            # one host returned from VMT, regardless of how many instances requested
+            if self.isSchedulerHintPresent and len(self.selected_hosts) == 1:
+                host = self.selected_hosts[0].get('host')
+            else:
+                host = self.selected_hosts.pop().get('host')
+            if host in hosts:
+                LOG.info('Host selected by VMTurbo ' + host)
+            else:
+                LOG.info('Host selected by VMTurbo is not up' + host)
+                self.placementFailed = True
+        else:
+            if self.placementFailed:
+                LOG.info('Not enough resources for placing the workload, check OpsMgr for reason')
+            else:
+                LOG.info('ERROR happens when OpsMgr trying to schedule, Please try again later')
+        return host
+ 
+    def select_destinations(self, context, request_spec, filter_properties):
+        LOG.info("select_destinations overridden in VMTScheduler")
+        self.schedule = False
+        num_instances = request_spec['num_instances']
+        instance_uuids = request_spec.get('instance_uuids')
+        self._schedule(context, CONF.compute_topic,
+                                        request_spec, filter_properties)
+        if self.placementFailed:
+            reason = _('There are not enough resources available.')
+            raise exception.NoValidHost(reason=reason)
+        dests = [dict(host=host.get('host'), nodename=host.get('nodename'),
+                      limits=host.get('limits')) for host in self.selected_hosts]
+        return dests
+ 
+    def schedule_run_instance(self, context, request_spec,
+                              admin_password, injected_files,
+                              requested_networks, is_first_time,
+                              filter_properties, legacy_bdm_in_spec):
+        LOG.info("Running schedule_run_instance for the VMTurboScheduler")
+        self.schedule = True
+        instance_uuids = request_spec.get('instance_uuids')
+        self._schedule(context, CONF.compute_topic, request_spec,
+                       filter_properties)
         for num, instance_uuid in enumerate(instance_uuids):
             request_spec['instance_properties']['launch_index'] = num
             try:
                 if '' == self.forceHost:
-                    host = self._schedule(context, CONF.compute_topic,
-                                      request_spec, filter_properties)
+                    host = self.getHostFromList(context, CONF.compute_topic)
                 else:
                     LOG.info('User specify the host: ' + str(self.forceHost))
                     host = self.forceHost
@@ -180,19 +187,19 @@ class VMTScheduler(driver.Scheduler):
                     reason = _('There are not enough resources available.')
                     raise exception.NoValidHost(reason=reason)
                 else:
-                	if "" == host:
-                		reason = _('Failed to schedule, please try again later.')
-                    		raise exception.NoValidHost(reason=reason)
-                    	else:
-                    		self.compute_rpcapi.run_instance(context,
-                        	instance=updated_instance, host=host,
-                        	requested_networks=requested_networks,
-                        	injected_files=injected_files,
-                        	admin_password=admin_password,
-                        	is_first_time=is_first_time,
-                        	request_spec=request_spec,
-                        	filter_properties=filter_properties,
-                        	legacy_bdm_in_spec=legacy_bdm_in_spec)
+                    if "" == host:
+                        reason = _('Failed to schedule, please try again later.')
+                        raise exception.NoValidHost(reason=reason)
+                    else:
+                        self.compute_rpcapi.run_instance(context,
+                        instance=updated_instance, host=host,
+                        requested_networks=requested_networks,
+                        injected_files=injected_files,
+                        admin_password=admin_password,
+                        is_first_time=is_first_time,
+                        request_spec=request_spec,
+                        filter_properties=filter_properties,
+                        legacy_bdm_in_spec=legacy_bdm_in_spec)
             except Exception as ex:
                 driver.handle_schedule_error(context, ex, instance_uuid,
                                              request_spec)
@@ -266,11 +273,11 @@ class VMTScheduler(driver.Scheduler):
             self.populateResourceList(reservationUuid)
         elif (statusRes == "PLACEMENT_FAILED"):
             LOG.warn("Placement with uuid " + reservationUuid + " failed to be placed")
-            self.host_array = []
+            self.selected_hosts = []
             self.placementFailed = True 
         else:
             LOG.warn("Placement with uuid " + reservationUuid + " could not be placed")
-            self.host_array = []
+            self.selected_hosts = []
 
     def deletePlacement(self, reservation_uuid):
         LOG.info("Deleting reservation." + reservation_uuid)
@@ -284,11 +291,12 @@ class VMTScheduler(driver.Scheduler):
 
     def populateResourceList(self, reservation_uuid):
         LOG.debug("Parsing Reservation response")
-        host_array = []
         reservation_xml = self.apiGet("/reservations/" + reservation_uuid)
         for xml_line in reservation_xml:
             if "name" in xml_line:
-                self.host_array.append(self.parseField("host", xml_line))
+                host = self.parseField("host", xml_line)
+                vmt_host = {"host" : host, "nodename" : host, "limits" : 0}
+                self.selected_hosts.append(vmt_host)
 
     def parseField(self, xml_field, xml_line):
         xml_field += "=\""
