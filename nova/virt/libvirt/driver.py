@@ -6464,6 +6464,7 @@ class HostState(object):
         data["hypervisor_type"] = self.driver._get_hypervisor_type()
         data["hypervisor_version"] = self.driver._get_hypervisor_version()
         data["hypervisor_hostname"] = self.driver._get_hypervisor_hostname()
+        data["extra_resources"] = self.driver._get_host_sysinfo_serial_hardware()
         data["cpu_info"] = self.driver._get_cpu_info()
         data['disk_available_least'] = _get_disk_available_least()
 

@@ -50,6 +50,7 @@ def make_hypervisor(elem, detail):
         elem.set('cpu_info')
         elem.set('disk_available_least')
         elem.set('host_ip')
+        elem.set('extra_resources')
 
         service = xmlutil.SubTemplateElement(elem, 'service',
                                              selector='service')
@@ -154,7 +155,8 @@ class HypervisorsController(object):
                       'memory_mb_used', 'local_gb_used',
                       'hypervisor_type', 'hypervisor_version',
                       'free_ram_mb', 'free_disk_gb', 'current_workload',
-                      'running_vms', 'cpu_info', 'disk_available_least')
+                      'running_vms', 'cpu_info', 'disk_available_least',
+                      'extra_resources')
             ext_loaded = self.ext_mgr.is_loaded('os-extended-hypervisors')
             if ext_loaded:
                 fields += ('host_ip',)
