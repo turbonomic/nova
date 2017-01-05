@@ -84,6 +84,8 @@ class VMTScheduler(driver.Scheduler):
         self.reservationName = request_spec.get('instance_properties').get('display_name')#"From Response - Name"
         self.vmPrefix = "VMTReservation"#"From Response - Create Something"
         self.flavor_name = request_spec.get('instance_type').get('name')#filter_properties['name']#"From Response - m1.tiny"
+        self.flavor_id = request_spec.get('instance_type').get('flavorid')
+        self.scheduler_ip = CONF.my_ip
         if self.schedule:
             self.deploymentProfile = request_spec.get('block_device_mapping')[0].get('image_id')#"From the response - <uuid>"
         else:
@@ -112,7 +114,7 @@ class VMTScheduler(driver.Scheduler):
         self.selected_hosts[:] = []
         if '' == self.forceHost:
             try:
-                self.templateName = self.getTemplateFromUuid(self.flavor_name, self.deploymentProfile)
+                self.templateName = self.getTemplateFromUuid(self.flavor_name, self.flavor_id, self.scheduler_ip, self.deploymentProfile)
                 reservationUuid = self.requestPlacement(self.isSchedulerHintPresent)
                 if "ERROR" != reservationUuid and "" != reservationUuid and reservationUuid is not None:
                     LOG.info("Template UUID " + self.templateName + " : Reservation UUID " + reservationUuid)
@@ -239,11 +241,14 @@ class VMTScheduler(driver.Scheduler):
             status = ""
         return status
 
-    def getTemplateFromUuid(self, flavor_name, service_uuid):
+    def getTemplateFromUuid(self, flavor_name, flavor_id, scheduler_ip, service_uuid):
         #LOG.info("Getting template uuid for serviceUuid: " + service_uuid)
         all_templates_xml = self.apiGet("/templates")
         for xml_line in all_templates_xml:
-            if ((self.parseField("displayName", xml_line).endswith("::TMP-" + flavor_name))):
+            desc = self.parseField("description", xml_line)
+            if (self.parseField("displayName", xml_line).endswith("::TMP-" + flavor_name)
+              and desc is not None and desc == flavor_id and scheduler_ip is not None
+              and scheduler_ip in self.parseField("name", xml_line)):
                 if service_uuid is None:
                     templateUuid = self.parseField("uuid", xml_line)
                     tempDeploy = self.parseField("services", xml_line)
