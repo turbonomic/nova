@@ -79,6 +79,7 @@ class VMTScheduler(driver.Scheduler):
         self.selected_hosts = []
         self.placementFailed = False
         self.notifier = rpc.get_notifier('scheduler')
+        self.scheduler_ip = CONF.my_ip
 
     def _schedule(self, context, spec_obj):
         """Create and run an instance or instances."""
@@ -86,7 +87,11 @@ class VMTScheduler(driver.Scheduler):
         self.reservationName = "Reservation"
         self.vmPrefix = "VMTReservation"#"From Response - Create Something"
         self.flavor_name = spec_obj.flavor.name
-        self.deploymentProfile = spec_obj.image.id
+        self.flavor_id = spec_obj.flavor.flavorid
+        if 'id' in spec_obj.image:
+            self.deploymentProfile = spec_obj.image.id
+        else:
+            self.deploymenyProfile = ""
         self.vmCount = spec_obj.num_instances#"From response"
         self.scheduler_hint = ''
         self.isSchedulerHintPresent = False
@@ -109,9 +114,9 @@ class VMTScheduler(driver.Scheduler):
         self.selected_hosts[:] = []
         if not self.forceHost:
             try:
-		self.templateName = self.getTemplateFromUuid(self.flavor_name, self.deploymentProfile)
-		LOG.info("Retrieved template Name " + self.templateName)
-		reservationUuid = self.requestPlacement(self.isSchedulerHintPresent)
+                self.templateName = self.getTemplateFromUuid(self.flavor_name, self.flavor_id, self.scheduler_ip, self.deploymentProfile)
+                LOG.info("Retrieved template Name " + self.templateName)
+                reservationUuid = self.requestPlacement(self.isSchedulerHintPresent)
                 if "ERROR" != reservationUuid and "" != reservationUuid and reservationUuid is not None:
                     LOG.info("Template UUID " + self.templateName + " : Reservation UUID " + reservationUuid)
                     self.pollForStatus(context, reservationUuid)
@@ -177,12 +182,15 @@ class VMTScheduler(driver.Scheduler):
             status = ""
         return status
 
-    def getTemplateFromUuid(self, flavor_name, service_uuid):
+    def getTemplateFromUuid(self, flavor_name, flavor_id, scheduler_ip, service_uuid):
         LOG.info("VMTurbo:: Getting template uuid for serviceUuid: " + service_uuid)
         all_templates_xml = self.apiGet("/templates")
         LOG.info(all_templates_xml)
-	for xml_line in all_templates_xml:
-            if ((self.parseField("displayName", xml_line).endswith("::TMP-" + flavor_name))):
+        for xml_line in all_templates_xml:
+            desc = self.parseField("description", xml_line)
+            if (self.parseField("displayName", xml_line).endswith("::TMP-" + flavor_name)
+              and desc is not None and desc == flavor_id and scheduler_ip is not None
+              and scheduler_ip in self.parseField("name", xml_line)):
                 if service_uuid is None:
                     templateUuid = self.parseField("uuid", xml_line)
                     tempDeploy = self.parseField("services", xml_line)
