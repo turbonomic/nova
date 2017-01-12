@@ -185,7 +185,6 @@ class VMTScheduler(driver.Scheduler):
     def getTemplateFromUuid(self, flavor_name, flavor_id, scheduler_ip, service_uuid):
         LOG.info("VMTurbo:: Getting template uuid for serviceUuid: " + service_uuid)
         all_templates_xml = self.apiGet("/templates")
-        LOG.info(all_templates_xml)
         for xml_line in all_templates_xml:
             desc = self.parseField("description", xml_line)
             if (self.parseField("displayName", xml_line).endswith("::TMP-" + flavor_name)
