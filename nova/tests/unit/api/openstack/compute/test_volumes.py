@@ -650,6 +650,26 @@ class VolumeAttachTestsV21(test.NoDBTestCase):
         self.assertRaises(self.validation_error, self.attachments.create,
                           req, FAKE_UUID, body=body)
 
+    @mock.patch.object(compute_api.API, 'attach_volume',
+                       side_effect=exception.DevicePathInUse(path='/dev/sda'))
+    def test_attach_volume_device_in_use(self, mock_attach):
+
+        body = {
+            'volumeAttachment': {
+                'device': '/dev/sda',
+                'volumeId': FAKE_UUID_A,
+            }
+        }
+
+        req = fakes.HTTPRequest.blank('/v2/servers/id/os-volume_attachments')
+        req.method = 'POST'
+        req.body = jsonutils.dump_as_bytes({})
+        req.headers['content-type'] = 'application/json'
+        req.environ['nova.context'] = self.context
+
+        self.assertRaises(webob.exc.HTTPConflict, self.attachments.create,
+                          req, FAKE_UUID, body=body)
+
     def test_attach_volume_without_volumeId(self):
         self.stubs.Set(compute_api.API,
                        'attach_volume',
@@ -721,9 +741,17 @@ class VolumeAttachTestsV21(test.NoDBTestCase):
             status_int = result.status_int
         self.assertEqual(202, status_int)
 
-    def test_swap_volume_no_attachment(self):
+    def test_swap_volume_with_nonexistent_uri(self):
         self.assertRaises(exc.HTTPNotFound, self._test_swap,
-                          self.attachments, FAKE_UUID_C)
+                          self.attachments, uuid=FAKE_UUID_C)
+
+    @mock.patch.object(cinder.API, 'get')
+    def test_swap_volume_with_nonexistent_dest_in_body(self, mock_update):
+        mock_update.side_effect = [
+            None, exception.VolumeNotFound(volume_id=FAKE_UUID_C)]
+        body = {'volumeAttachment': {'volumeId': FAKE_UUID_C}}
+        self.assertRaises(exc.HTTPBadRequest, self._test_swap,
+                          self.attachments, body=body)
 
     def test_swap_volume_without_volumeId(self):
         body = {'volumeAttachment': {'device': '/dev/fake'}}
@@ -827,6 +855,14 @@ class BadRequestVolumeTestCaseV21(CommonBadRequestTestCase,
     entity_name = 'volume'
     controller_cls = volumes_v21.VolumeController
     bad_request = exception.ValidationError
+
+    @mock.patch.object(cinder.API, 'delete',
+        side_effect=exception.InvalidInput(reason='vol attach'))
+    def test_delete_invalid_status_volume(self, mock_delete):
+        req = fakes.HTTPRequest.blank('/v2.1/os-volumes')
+        req.method = 'DELETE'
+        self.assertRaises(webob.exc.HTTPBadRequest,
+                          self.controller.delete, req, FAKE_UUID)
 
 
 class BadRequestVolumeTestCaseV2(BadRequestVolumeTestCaseV21):

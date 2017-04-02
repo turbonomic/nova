@@ -195,20 +195,24 @@ class ResourceTracker(object):
                   "MB", {'flavor': instance_ref.memory_mb,
                           'overhead': overhead['memory_mb']})
 
+        pci_requests = objects.InstancePCIRequests.get_by_instance_uuid(
+            context, instance_ref.uuid)
         claim = claims.Claim(context, instance_ref, self, self.compute_node,
-                             overhead=overhead, limits=limits)
-
-        if self.pci_tracker:
-            # NOTE(jaypipes): ComputeNode.pci_device_pools is set below
-            # in _update_usage_from_instance().
-            self.pci_tracker.claim_instance(context, instance_ref)
+                             pci_requests, overhead=overhead, limits=limits)
 
         # self._set_instance_host_and_node() will save instance_ref to the DB
         # so set instance_ref['numa_topology'] first.  We need to make sure
         # that numa_topology is saved while under COMPUTE_RESOURCE_SEMAPHORE
         # so that the resource audit knows about any cpus we've pinned.
-        instance_ref.numa_topology = claim.claimed_numa_topology
+        instance_numa_topology = claim.claimed_numa_topology
+        instance_ref.numa_topology = instance_numa_topology
         self._set_instance_host_and_node(instance_ref)
+
+        if self.pci_tracker:
+            # NOTE(jaypipes): ComputeNode.pci_device_pools is set below
+            # in _update_usage_from_instance().
+            self.pci_tracker.claim_instance(context, pci_requests,
+                                            instance_numa_topology)
 
         # Mark resources in-use and update stats
         self._update_usage_from_instance(context, instance_ref)
@@ -274,9 +278,13 @@ class ResourceTracker(object):
                   "MB", {'flavor': new_instance_type.memory_mb,
                           'overhead': overhead['memory_mb']})
 
+        pci_requests = objects.InstancePCIRequests.\
+                       get_by_instance_uuid_and_newness(
+                           context, instance.uuid, True)
         claim = claims.MoveClaim(context, instance, new_instance_type,
                                  image_meta, self, self.compute_node,
-                                 overhead=overhead, limits=limits)
+                                 pci_requests, overhead=overhead,
+                                 limits=limits)
         claim.migration = migration
         instance.migration_context = claim.create_migration_context()
         instance.save()
@@ -372,7 +380,7 @@ class ResourceTracker(object):
 
             if instance_type is not None and instance_type.id == itype['id']:
                 numa_topology = self._get_migration_context_resource(
-                    'numa_topology', instance)
+                    'numa_topology', instance, prefix=prefix)
                 usage = self._get_usage_dict(
                         itype, numa_topology=numa_topology)
                 if self.pci_tracker:
@@ -869,9 +877,10 @@ class ResourceTracker(object):
 
         uuid = instance['uuid']
         is_new_instance = uuid not in self.tracked_instances
-        is_removed_instance = (
-                is_removed or
-                instance['vm_state'] in vm_states.ALLOW_RESOURCE_REMOVAL)
+        # NOTE(sfinucan): Both brand new instances as well as instances that
+        # are being unshelved will have is_new_instance == True
+        is_removed_instance = not is_new_instance and (is_removed or
+            instance['vm_state'] in vm_states.ALLOW_RESOURCE_REMOVAL)
 
         if is_new_instance:
             self.tracked_instances[uuid] = obj_base.obj_to_primitive(instance)

@@ -27,6 +27,7 @@ from nova.objects import instance
 from nova.objects import pci_device
 from nova import test
 from nova.tests.unit.objects import test_objects
+from nova.tests import uuidsentinel as uuids
 
 dev_dict = {
     'compute_node_id': 1,
@@ -208,11 +209,11 @@ class _TestPciDeviceObject(object):
         ctxt = context.get_admin_context()
         self._create_fake_pci_device(ctxt=ctxt)
         return_dev = dict(fake_db_dev, status=fields.PciDeviceStatus.AVAILABLE,
-                          instance_uuid='fake-uuid-3')
+                          instance_uuid=uuids.instance3)
         self.pci_device.status = fields.PciDeviceStatus.ALLOCATED
-        self.pci_device.instance_uuid = 'fake-uuid-2'
+        self.pci_device.instance_uuid = uuids.instance2
         expected_updates = dict(status=fields.PciDeviceStatus.ALLOCATED,
-                                instance_uuid='fake-uuid-2')
+                                instance_uuid=uuids.instance2)
         self.mox.StubOutWithMock(db, 'pci_device_update')
         db.pci_device_update(ctxt, 1, 'a',
                              expected_updates).AndReturn(return_dev)
@@ -221,11 +222,11 @@ class _TestPciDeviceObject(object):
         self.assertEqual(self.pci_device.status,
                          fields.PciDeviceStatus.AVAILABLE)
         self.assertEqual(self.pci_device.instance_uuid,
-                         'fake-uuid-3')
+                         uuids.instance3)
 
     def test_save_no_extra_info(self):
         return_dev = dict(fake_db_dev, status=fields.PciDeviceStatus.AVAILABLE,
-                          instance_uuid='fake-uuid-3')
+                          instance_uuid=uuids.instance3)
 
         def _fake_update(ctxt, node_id, addr, updates):
             self.extra_info = updates.get('extra_info')
@@ -306,6 +307,16 @@ class _TestPciDeviceObject(object):
             self.assertIn("other",
                           update_mock.call_args[0][3]['extra_info'])
 
+    @mock.patch('nova.objects.Service.get_minimum_version')
+    @mock.patch('nova.context.get_admin_context')
+    def test_should_migrate_checks_correct_services(self, mock_gc, mock_gmv):
+        mock_gmv.return_value = 100
+        self.assertTrue(objects.PciDevice.should_migrate_data())
+        mock_gmv.assert_has_calls([
+            mock.call(mock_gc.return_value, 'nova-conductor'),
+            mock.call(mock_gc.return_value, 'nova-osapi_compute'),
+        ])
+
     def test_update_numa_node(self):
         self.pci_device = pci_device.PciDevice.create(None, dev_dict)
         self.assertEqual(0, self.pci_device.numa_node)
@@ -346,10 +357,17 @@ class _TestPciDeviceObject(object):
         pci_device2.instance_uuid = None
         self.assertNotEqual(pci_device1, pci_device2)
 
+    def test_pci_device_not_equivalent_with_not_pci_device(self):
+        pci_device1 = pci_device.PciDevice.create(None, dev_dict)
+        self.assertNotEqual(pci_device1, None)
+        self.assertNotEqual(pci_device1, 'foo')
+        self.assertNotEqual(pci_device1, 1)
+        self.assertNotEqual(pci_device1, objects.PciDeviceList())
+
     def test_claim_device(self):
         self._create_fake_instance()
         devobj = pci_device.PciDevice.create(None, dev_dict)
-        devobj.claim(self.inst)
+        devobj.claim(self.inst.uuid)
         self.assertEqual(devobj.status,
                          fields.PciDeviceStatus.CLAIMED)
         self.assertEqual(devobj.instance_uuid,
@@ -366,7 +384,7 @@ class _TestPciDeviceObject(object):
     def test_allocate_device(self):
         self._create_fake_instance()
         devobj = pci_device.PciDevice.create(None, dev_dict)
-        devobj.claim(self.inst)
+        devobj.claim(self.inst.uuid)
         devobj.allocate(self.inst)
         self.assertEqual(devobj.status,
                          fields.PciDeviceStatus.ALLOCATED)
@@ -389,14 +407,14 @@ class _TestPciDeviceObject(object):
         inst_2 = instance.Instance()
         inst_2.uuid = 'fake-inst-uuid-2'
         devobj = pci_device.PciDevice.create(None, dev_dict)
-        devobj.claim(self.inst)
+        devobj.claim(self.inst.uuid)
         self.assertRaises(exception.PciDeviceInvalidOwner,
                           devobj.allocate, inst_2)
 
     def test_free_claimed_device(self):
         self._create_fake_instance()
         devobj = pci_device.PciDevice.create(None, dev_dict)
-        devobj.claim(self.inst)
+        devobj.claim(self.inst.uuid)
         devobj.free(self.inst)
         self.assertEqual(devobj.status,
                          fields.PciDeviceStatus.AVAILABLE)
@@ -407,7 +425,7 @@ class _TestPciDeviceObject(object):
         ctx = context.get_admin_context()
         devobj = pci_device.PciDevice._from_db_object(
                 ctx, pci_device.PciDevice(), fake_db_dev)
-        devobj.claim(self.inst)
+        devobj.claim(self.inst.uuid)
         devobj.allocate(self.inst)
         self.assertEqual(len(self.inst.pci_devices), 1)
         devobj.free(self.inst)
@@ -432,7 +450,7 @@ class _TestPciDeviceObject(object):
     def test_remove_device_fail(self):
         self._create_fake_instance()
         devobj = pci_device.PciDevice.create(None, dev_dict)
-        devobj.claim(self.inst)
+        devobj.claim(self.inst.uuid)
         self.assertRaises(exception.PciDeviceInvalidStatus, devobj.remove)
 
 
@@ -554,7 +572,7 @@ class _TestSRIOVPciDeviceObject(object):
                                side_effect=self._fake_get_by_parent_address):
             self._create_pci_devices()
             devobj = self.sriov_pf_devices[0]
-            devobj.claim(self.inst)
+            devobj.claim(self.inst.uuid)
             self.assertEqual(devobj.status,
                              fields.PciDeviceStatus.CLAIMED)
             self.assertEqual(devobj.instance_uuid,
@@ -572,7 +590,7 @@ class _TestSRIOVPciDeviceObject(object):
                                side_effect=self._fake_pci_device_get_by_addr):
             self._create_pci_devices()
             devobj = self.sriov_vf_devices[0]
-            devobj.claim(self.inst)
+            devobj.claim(self.inst.uuid)
             self.assertEqual(devobj.status,
                              fields.PciDeviceStatus.CLAIMED)
             self.assertEqual(devobj.instance_uuid,
@@ -590,7 +608,7 @@ class _TestSRIOVPciDeviceObject(object):
                                side_effect=self._fake_get_by_parent_address):
             self._create_pci_devices()
             devobj = self.sriov_pf_devices[0]
-            devobj.claim(self.inst)
+            devobj.claim(self.inst.uuid)
             devobj.allocate(self.inst)
             self.assertEqual(devobj.status,
                              fields.PciDeviceStatus.ALLOCATED)
@@ -609,7 +627,7 @@ class _TestSRIOVPciDeviceObject(object):
                                side_effect=self._fake_pci_device_get_by_addr):
             self._create_pci_devices()
             devobj = self.sriov_vf_devices[0]
-            devobj.claim(self.inst)
+            devobj.claim(self.inst.uuid)
             devobj.allocate(self.inst)
             self.assertEqual(devobj.status,
                              fields.PciDeviceStatus.ALLOCATED)
@@ -676,7 +694,7 @@ class _TestSRIOVPciDeviceObject(object):
                                side_effect=self._fake_get_by_parent_address):
             self._create_pci_devices()
             devobj = self.sriov_pf_devices[0]
-            devobj.claim(self.inst)
+            devobj.claim(self.inst.uuid)
             devobj.allocate(self.inst)
             devobj.free(self.inst)
             self.assertEqual(devobj.status,
@@ -700,7 +718,7 @@ class _TestSRIOVPciDeviceObject(object):
             dependents = self._fake_get_by_parent_address(None, None,
                                                           vf.parent_addr)
             for devobj in dependents:
-                devobj.claim(self.inst)
+                devobj.claim(self.inst.uuid)
                 devobj.allocate(self.inst)
                 self.assertEqual(devobj.status,
                                  fields.PciDeviceStatus.ALLOCATED)

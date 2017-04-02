@@ -1860,14 +1860,16 @@ class SecurityGroupTestCase(test.TestCase, ModelsObjectComparatorMixin):
                           self.ctxt, security_group1['id'])
         self._assertEqualObjects(db.security_group_get(
                 self.ctxt, security_group2['id'],
-                columns_to_join=['instances']), security_group2)
+                columns_to_join=['instances',
+                                 'rules']), security_group2)
 
     def test_security_group_get(self):
         security_group1 = self._create_security_group({})
         self._create_security_group({'name': 'fake_sec_group2'})
         real_security_group = db.security_group_get(self.ctxt,
                                               security_group1['id'],
-                                              columns_to_join=['instances'])
+                                              columns_to_join=['instances',
+                                                               'rules'])
         self._assertEqualObjects(security_group1,
                                  real_security_group)
 
@@ -2099,6 +2101,12 @@ class InstanceTestCase(test.TestCase, ModelsObjectComparatorMixin):
         return db.instance_create(context, args)
 
     def test_instance_create(self):
+        instance = self.create_instance_with_args()
+        self.assertTrue(uuidutils.is_uuid_like(instance['uuid']))
+
+    @mock.patch.object(db.sqlalchemy.api, 'security_group_ensure_default')
+    def test_instance_create_with_deadlock_retry(self, mock_sg):
+        mock_sg.side_effect = [db_exc.DBDeadlock(), None]
         instance = self.create_instance_with_args()
         self.assertTrue(uuidutils.is_uuid_like(instance['uuid']))
 
@@ -3419,6 +3427,10 @@ class ServiceTestCase(test.TestCase, ModelsObjectComparatorMixin):
         self._create_service({'version': 3,
                               'host': 'host2',
                               'binary': 'compute'})
+        self._create_service({'version': 0,
+                              'host': 'host0',
+                              'binary': 'compute',
+                              'deleted': 1})
         self.assertEqual(2, db.service_get_minimum_version(self.ctxt,
                                                            'compute'))
 

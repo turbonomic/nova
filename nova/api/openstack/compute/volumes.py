@@ -114,7 +114,7 @@ class VolumeController(wsgi.Controller):
         return {'volume': _translate_volume_detail_view(context, vol)}
 
     @wsgi.response(202)
-    @extensions.expected_errors(404)
+    @extensions.expected_errors((400, 404))
     def delete(self, req, id):
         """Delete a volume."""
         context = req.environ['nova.context']
@@ -122,6 +122,8 @@ class VolumeController(wsgi.Controller):
 
         try:
             self.volume_api.delete(context, id)
+        except exception.InvalidInput as e:
+            raise exc.HTTPBadRequest(explanation=e.format_message())
         except exception.VolumeNotFound as e:
             raise exc.HTTPNotFound(explanation=e.format_message())
 
@@ -320,6 +322,8 @@ class VolumeAttachmentController(wsgi.Controller):
             raise exc.HTTPNotFound(explanation=e.format_message())
         except exception.InstanceIsLocked as e:
             raise exc.HTTPConflict(explanation=e.format_message())
+        except exception.DevicePathInUse as e:
+            raise exc.HTTPConflict(explanation=e.format_message())
         except exception.InstanceInvalidState as state_error:
             common.raise_http_conflict_for_instance_invalid_state(state_error,
                     'attach_volume', server_id)
@@ -356,11 +360,21 @@ class VolumeAttachmentController(wsgi.Controller):
         old_volume_id = id
         try:
             old_volume = self.volume_api.get(context, old_volume_id)
-
-            new_volume_id = body['volumeAttachment']['volumeId']
-            new_volume = self.volume_api.get(context, new_volume_id)
         except exception.VolumeNotFound as e:
             raise exc.HTTPNotFound(explanation=e.format_message())
+
+        new_volume_id = body['volumeAttachment']['volumeId']
+        try:
+            new_volume = self.volume_api.get(context, new_volume_id)
+        except exception.VolumeNotFound as e:
+            # NOTE: This BadRequest is different from the above NotFound even
+            # though the same VolumeNotFound exception. This is intentional
+            # because new_volume_id is specified in a request body and if a
+            # nonexistent resource in the body (not URI) the code should be
+            # 400 Bad Request as API-WG guideline. On the other hand,
+            # old_volume_id is specified with URI. So it is valid to return
+            # NotFound response if that is not existent.
+            raise exc.HTTPBadRequest(explanation=e.format_message())
 
         instance = common.get_instance(self.compute_api, context, server_id)
 

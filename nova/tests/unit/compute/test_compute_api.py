@@ -19,6 +19,7 @@ import datetime
 import iso8601
 import mock
 from mox3 import mox
+from oslo_messaging import exceptions as oslo_exceptions
 from oslo_policy import policy as oslo_policy
 from oslo_serialization import jsonutils
 from oslo_utils import fixture as utils_fixture
@@ -1204,7 +1205,7 @@ class _ComputeAPIUnitTestMixIn(object):
         self.mox.StubOutWithMock(compute_utils,
                                  'notify_about_instance_usage')
         self.mox.StubOutWithMock(self.compute_api.volume_api,
-                                 'terminate_connection')
+                                 'detach')
         self.mox.StubOutWithMock(objects.BlockDeviceMapping, 'destroy')
 
         compute_utils.notify_about_instance_usage(
@@ -1215,9 +1216,9 @@ class _ComputeAPIUnitTestMixIn(object):
             self.compute_api.network_api.deallocate_for_instance(
                         self.context, inst)
 
-        self.compute_api.volume_api.terminate_connection(
-            mox.IgnoreArg(), mox.IgnoreArg(), mox.IgnoreArg()).\
-               AndRaise(exception.  VolumeNotFound('volume_id'))
+        self.compute_api.volume_api.detach(
+            mox.IgnoreArg(), 'volume_id', inst.uuid).\
+               AndRaise(exception.VolumeNotFound('volume_id'))
         bdms[0].destroy()
 
         inst.destroy()
@@ -1230,6 +1231,68 @@ class _ComputeAPIUnitTestMixIn(object):
         self.compute_api._local_delete(self.context, inst, bdms,
                                        'delete',
                                        self._fake_do_delete)
+
+    @mock.patch.object(objects.BlockDeviceMapping, 'destroy')
+    def test_local_cleanup_bdm_volumes_stashed_connector(self, mock_destroy):
+        """Tests that we call volume_api.terminate_connection when we found
+        a stashed connector in the bdm.connection_info dict.
+        """
+        inst = self._create_instance_obj()
+        # create two fake bdms, one is a volume and one isn't, both will be
+        # destroyed but we only cleanup the volume bdm in cinder
+        conn_info = {'connector': {'host': inst.host}}
+        vol_bdm = objects.BlockDeviceMapping(self.context, id=1,
+                                             instance_uuid=inst.uuid,
+                                             volume_id=uuids.volume_id,
+                                             source_type='volume',
+                                             destination_type='volume',
+                                             delete_on_termination=True,
+                                             connection_info=jsonutils.dumps(
+                                                conn_info
+                                             ))
+        loc_bdm = objects.BlockDeviceMapping(self.context, id=2,
+                                             instance_uuid=inst.uuid,
+                                             volume_id=uuids.volume_id2,
+                                             source_type='blank',
+                                             destination_type='local')
+        bdms = objects.BlockDeviceMappingList(objects=[vol_bdm, loc_bdm])
+
+        @mock.patch.object(self.compute_api.volume_api, 'terminate_connection')
+        @mock.patch.object(self.compute_api.volume_api, 'detach')
+        @mock.patch.object(self.compute_api.volume_api, 'delete')
+        @mock.patch.object(self.context, 'elevated', return_value=self.context)
+        def do_test(self, mock_elevated, mock_delete,
+                    mock_detach, mock_terminate):
+            self.compute_api._local_cleanup_bdm_volumes(
+                bdms, inst, self.context)
+            mock_terminate.assert_called_once_with(
+                self.context, uuids.volume_id, conn_info['connector'])
+            mock_detach.assert_called_once_with(
+                self.context, uuids.volume_id, inst.uuid)
+            mock_delete.assert_called_once_with(self.context, uuids.volume_id)
+            self.assertEqual(2, mock_destroy.call_count)
+
+        do_test(self)
+
+    def test_get_stashed_volume_connector_none(self):
+        inst = self._create_instance_obj()
+        # connection_info isn't set
+        bdm = objects.BlockDeviceMapping(self.context)
+        self.assertIsNone(
+            self.compute_api._get_stashed_volume_connector(bdm, inst))
+        # connection_info is None
+        bdm.connection_info = None
+        self.assertIsNone(
+            self.compute_api._get_stashed_volume_connector(bdm, inst))
+        # connector is not set in connection_info
+        bdm.connection_info = jsonutils.dumps({})
+        self.assertIsNone(
+            self.compute_api._get_stashed_volume_connector(bdm, inst))
+        # connector is set but different host
+        conn_info = {'connector': {'host': 'other_host'}}
+        bdm.connection_info = jsonutils.dumps(conn_info)
+        self.assertIsNone(
+            self.compute_api._get_stashed_volume_connector(bdm, inst))
 
     def test_local_delete_without_info_cache(self):
         inst = self._create_instance_obj()
@@ -1871,6 +1934,30 @@ class _ComputeAPIUnitTestMixIn(object):
         paused_state = dict(vm_state=vm_states.PAUSED)
         instance = self._create_instance_obj(params=paused_state)
         self._live_migrate_instance(instance)
+
+    @mock.patch.object(compute_utils, 'add_instance_fault_from_exc')
+    @mock.patch.object(objects.RequestSpec, 'get_by_instance_uuid')
+    @mock.patch.object(objects.InstanceAction, 'action_start')
+    @mock.patch.object(objects.Instance, 'save')
+    def test_live_migrate_messaging_timeout(self, _save, _action, get_spec,
+                                            add_instance_fault_from_exc):
+        instance = self._create_instance_obj()
+        if self.cell_type == 'api':
+            api = self.compute_api.cells_rpcapi
+        else:
+            api = conductor.api.ComputeTaskAPI
+
+        with mock.patch.object(api, 'live_migrate_instance',
+                               side_effect=oslo_exceptions.MessagingTimeout):
+            self.assertRaises(oslo_exceptions.MessagingTimeout,
+                              self.compute_api.live_migrate,
+                              self.context, instance,
+                              host_name='fake_dest_host',
+                              block_migration=True, disk_over_commit=True)
+            add_instance_fault_from_exc.assert_called_once_with(
+                self.context,
+                instance,
+                mock.ANY)
 
     @mock.patch.object(objects.RequestSpec, 'get_by_instance_uuid')
     @mock.patch.object(objects.Instance, 'save')
@@ -3595,6 +3682,20 @@ class ComputeAPIAPICellUnitTestCase(_ComputeAPIUnitTestMixIn,
 
     def test_attach_volume_reserve_fails(self):
         self.skipTest("Reserve is never done in the API cell.")
+
+    def _test_shelve(self, vm_state=vm_states.ACTIVE,
+                     boot_from_volume=False, clean_shutdown=True):
+        params = dict(task_state=None, vm_state=vm_state,
+                      display_name='fake-name')
+        instance = self._create_instance_obj(params=params)
+        with mock.patch.object(self.compute_api,
+                               '_cast_to_cells') as cast_to_cells:
+            self.compute_api.shelve(self.context, instance,
+                                    clean_shutdown=clean_shutdown)
+            cast_to_cells.assert_called_once_with(self.context,
+                                                  instance, 'shelve',
+                                                  clean_shutdown=clean_shutdown
+                                                  )
 
 
 class ComputeAPIComputeCellUnitTestCase(_ComputeAPIUnitTestMixIn,

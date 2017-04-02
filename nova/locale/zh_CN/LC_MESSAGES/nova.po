@@ -30,17 +30,18 @@
 # English translations for nova.
 # Daisy <guoyingc@cn.ibm.com>, 2016. #zanata
 # Linda <duleish@cn.ibm.com>, 2016. #zanata
+# cuixiaoyu <cuixiaoyu@163.com>, 2016. #zanata
 # maoshuai <fwsakura@163.com>, 2016. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: nova 13.1.1.dev3\n"
+"Project-Id-Version: nova 13.1.3.dev12\n"
 "Report-Msgid-Bugs-To: https://bugs.launchpad.net/openstack-i18n/\n"
-"POT-Creation-Date: 2016-07-19 22:58+0000\n"
+"POT-Creation-Date: 2016-10-18 10:31+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"PO-Revision-Date: 2016-07-20 09:59+0000\n"
-"Last-Translator: maoshuai <fwsakura@163.com>\n"
+"PO-Revision-Date: 2016-08-30 09:29+0000\n"
+"Last-Translator: cuixiaoyu <cuixiaoyu@163.com>\n"
 "Language: zh-CN\n"
 "Language-Team: Chinese (China)\n"
 "Plural-Forms: nplurals=1; plural=0\n"
@@ -1625,14 +1626,6 @@ msgstr "发现不唯一的网络 name_label %s"
 #, python-format
 msgid "Free %(type)s %(free).02f %(unit)s < requested %(requested)d %(unit)s"
 msgstr "剩余的 %(type)s %(free).02f %(unit)s 小于请求的 %(requested)d %(unit)s"
-
-#, python-format
-msgid "Glance image %(image_id)s is in unknown state - %(state)s"
-msgstr "Glance 映像 %(image_id)s 处于未知状态 - %(state)s"
-
-#, python-format
-msgid "Glance image %s is in killed state"
-msgstr "Glance 映像 %s 为已终止状态"
 
 #, python-format
 msgid "Group not valid. Reason: %(reason)s"
@@ -4444,8 +4437,8 @@ msgid "Unknown argument: port"
 msgstr "未知参数：port"
 
 #, python-format
-msgid "Unknown auth plugin: %s"
-msgstr "未知认证插件：%s"
+msgid "Unknown auth type: %s"
+msgstr "未知认证类型：%s"
 
 #, python-format
 msgid "Unknown chain: %r"

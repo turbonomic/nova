@@ -150,6 +150,66 @@ class BlockDeviceMappingTestV21(test.TestCase):
         params = {block_device_mapping.ATTRIBUTE_NAME: self.bdm}
         self._test_create(params, no_image=True)
 
+    def test_create_instance_with_invalid_bdm_in_2nd_dict(self):
+        bdm_1st = {"source_type": "image", "delete_on_termination": True,
+                   "boot_index": 0,
+                   "uuid": "2ff3a1d3-ed70-4c3f-94ac-941461153bc0",
+                   "destination_type": "local"}
+        bdm_2nd = {"source_type": "volume",
+                   "uuid": "99d92140-3d0c-4ea5-a49c-f94c38c607f0",
+                   "destination_type": "invalid"}
+        bdm = [bdm_1st, bdm_2nd]
+
+        params = {block_device_mapping.ATTRIBUTE_NAME: bdm,
+                  'imageRef': '2ff3a1d3-ed70-4c3f-94ac-941461153bc0'}
+        self.assertRaises(exception.ValidationError,
+                          self._test_create, params)
+
+    def test_create_instance_with_boot_index_none_ok(self):
+        """Tests creating a server with two block devices. One is the boot
+        device and the other is a non-bootable device.
+        """
+        # From the docs:
+        # To disable a device from booting, set the boot index to a negative
+        # value or use the default boot index value, which is None. The
+        # simplest usage is, set the boot index of the boot device to 0 and use
+        # the default boot index value, None, for any other devices.
+        bdms = [
+            # This is the bootable device that would create a 20GB cinder
+            # volume from the given image.
+            {
+                'source_type': 'image',
+                'destination_type': 'volume',
+                'boot_index': 0,
+                'uuid': '155d900f-4e14-4e4c-a73d-069cbf4541e6',
+                'volume_size': 20
+            },
+            # This is the non-bootable 10GB ext4 ephemeral block device.
+            {
+                'source_type': 'blank',
+                'destination_type': 'local',
+                'boot_index': None,
+                # If 'guest_format' is 'swap' then a swap device is created.
+                'guest_format': 'ext4'
+            }
+        ]
+        params = {block_device_mapping.ATTRIBUTE_NAME: bdms}
+        self._test_create(params, no_image=True)
+
+    def test_create_instance_with_boot_index_none_image_local_fails(self):
+        """Tests creating a server with a local image-based block device which
+        has a boot_index of None which is invalid.
+        """
+        bdms = [{
+            'source_type': 'image',
+            'destination_type': 'local',
+            'boot_index': None,
+            'uuid': '155d900f-4e14-4e4c-a73d-069cbf4541e6'
+        }]
+        params = {block_device_mapping.ATTRIBUTE_NAME: bdms}
+        self.assertRaises(exc.HTTPBadRequest, self._test_create,
+                          params, no_image=True)
+
     def test_create_instance_with_device_name_not_string(self):
         self.bdm[0]['device_name'] = 123
         old_create = compute_api.API.create
@@ -382,6 +442,11 @@ class BlockDeviceMappingTestV2(BlockDeviceMappingTestV21):
         pass
 
     def test_create_instance_with_invalid_destination_type(self):
+        # Add a check whether the destination type is invalid
+        # in V2.1 API only. So this test is skipped in V2.0 API
+        pass
+
+    def test_create_instance_with_invalid_bdm_in_2nd_dict(self):
         # Add a check whether the destination type is invalid
         # in V2.1 API only. So this test is skipped in V2.0 API
         pass
