@@ -94,6 +94,7 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject,
         'cpu_allocation_ratio': fields.FloatField(),
         'ram_allocation_ratio': fields.FloatField(),
         'disk_allocation_ratio': fields.FloatField(),
+        'extra_resources': fields.StringField(nullable=True)
         }
 
     def obj_make_compatible(self, primitive, target_version):
@@ -307,6 +308,15 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject,
                 pools = jsonutils.dumps(pools.obj_to_primitive())
             updates['pci_stats'] = pools
 
+    @staticmethod
+    def _convert_extra_resources_to_db_format(updates):
+        if 'extra_resources' in updates:
+            extra_resources = updates.pop('extra_resources', None)
+            if extra_resources is not None:
+                updates['extra_resources'] = str(extra_resources)
+                LOG.debug('Converting extra_resources update %s' %updates['extra_resources'])
+
+
     @base.remotable
     def create(self):
         if self.obj_attr_is_set('id'):
@@ -330,6 +340,8 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject,
 
         updates = self.obj_get_changes()
         updates.pop('id', None)
+
+        self._convert_extra_resources_to_db_format(updates)
         self._convert_stats_to_db_format(updates)
         self._convert_host_ip_to_db_format(updates)
         self._convert_supported_instances_to_db_format(updates)
@@ -351,7 +363,7 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject,
                 "vcpus_used", "memory_mb_used", "local_gb_used",
                 "numa_topology", "hypervisor_type",
                 "hypervisor_version", "hypervisor_hostname",
-                "disk_available_least", "host_ip"]
+                "disk_available_least", "host_ip", "extra_resources"]
         for key in keys:
             if key in resources:
                 self[key] = resources[key]
