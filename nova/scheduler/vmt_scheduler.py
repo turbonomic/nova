@@ -110,7 +110,7 @@ class VMTScheduler(driver.Scheduler):
         else:
             LOG.info('No Force Host in filter_properties')
         LOG.info(self.reservationName + " : " + self.vmPrefix + " : " + self.flavor_name + " : " + str(self.deploymentProfile)
-        + " : " + str(self.vmCount) + " : " + self.vmt_url + " : " + self.auth[0] + " : " + self.auth[1] + " : " + str(self.scheduler_hint))
+        + " : " + str(self.vmCount) + " : " + self.vmt_url + " : " + self.auth[0] + " : " + str(self.scheduler_hint))
         self.selected_hosts[:] = []
         if '' == self.forceHost:
             try:
