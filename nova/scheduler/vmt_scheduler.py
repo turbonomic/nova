@@ -110,7 +110,7 @@ class VMTScheduler(driver.Scheduler):
             LOG.info('scheduler_hints not present')
         self.forceHost = spec_obj.force_hosts or []
         LOG.info(self.reservationName + " : " + self.vmPrefix + " : " + self.flavor_name + " : " + str(self.deploymentProfile)
-        + " : " + str(self.vmCount) + " : " + self.vmt_url + " : " + self.auth[0] + " : " + self.auth[1] + " : " + str(self.scheduler_hint))
+        + " : " + str(self.vmCount) + " : " + self.vmt_url + " : " + self.auth[0] + " : " + str(self.scheduler_hint))
         self.selected_hosts[:] = []
         if not self.forceHost:
             try:
