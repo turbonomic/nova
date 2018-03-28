@@ -23,7 +23,8 @@ the following entries must be added in the /etc/nova/nova.conf file
 under the [DEFAULT] section
 ------------------------------------------------------------
 scheduler_driver = nova.scheduler.turbonomic_scheduler.TurbonomicScheduler
-turbonomic_rest_uri = <Turbonomic_IPAddress>
+turbonomic_protocol = <Turbonomic_Protocol>
+turbonomic_address = <Turbonomic_Address>
 turbonomic_username = <Turbonomic_UserName>
 turbonomic_password = <Turbonomic_Password>
 turbonomic_verify_ssl = <Verify_ssl_certificate, defaults to False>
@@ -38,6 +39,8 @@ NOTE: 1) 'scheduler_driver' might already be configured to the default scheduler
 
       4) In order to force NOVA deploy a new VM in an affinity group, run the following command:
         nova boot --flavor <FLAVOR_ID> --image <IMG_UUID> --nic net-id=<NIC_ID> --hint group=<AFFINITY_GROUP_UUID> <VM_NAME>
+
+      5) This script should be placed to /lib/python2.7/site-packages/nova/scheduler
 
     At the time of writing features 3 and 4 were unavailable in OpenStack UI and could be used only from CLI
 
@@ -59,11 +62,13 @@ import json
 import uuid
 
 ext_opts = [
-    cfg.StrOpt('turbonomic_rest_uri', default='URI', help='turbonomic Server URL'),
-    cfg.StrOpt('turbonomic_username', default='VMT_USER', help='turbonomic Server Username'),
-    cfg.StrOpt('turbonomic_password', default='VMT_PWD', help='turbonomic Server Username'),
+    cfg.StrOpt('turbonomic_protocol', default='https', help='turbonomic Server protocol, http or https'),
+    cfg.StrOpt('turbonomic_address', default='URI', help='turbonomic Server address'),
+    cfg.StrOpt('turbonomic_username', default='administrator', help='turbonomic Server Username'),
+    cfg.StrOpt('turbonomic_password', default='administrator', help='turbonomic Server Password'),
     cfg.StrOpt('turbonomic_verify_ssl', default='False', help='Verify SSL certificate'),
 ]
+
 CONF = nova.conf.CONF
 CONF.register_opts(ext_opts)
 LOG = logging.getLogger(__name__)
@@ -71,13 +76,12 @@ LOG = logging.getLogger(__name__)
 class TurbonomicScheduler(driver.Scheduler):
     def __init__(self, *args, **kwargs):
         super(TurbonomicScheduler, self).__init__(*args, **kwargs)
-        self.vmt_url = 'http://' + CONF.turbonomic_rest_uri + "/vmturbo/rest/"
+        self.turbonomic_rest_endpoint = CONF.turbonomic_protocol + "://" + CONF.turbonomic_address + "/vmturbo/rest/"
         self.auth = (CONF.turbonomic_username, CONF.turbonomic_password)
         self.notifier = rpc.get_notifier('scheduler')
-        self.scheduler_ip = CONF.my_ip
         self.j_session_id = None
-        self.verify_ssl = CONF.turbonomic_verify_ssl
-        LOG.info('Initialized, verify_ssl: {}'.format(CONF.turbonomic_verify_ssl))
+        self.verify_ssl = ('true' == CONF.turbonomic_verify_ssl.lower())
+        LOG.info('Initialized, URL: {}, verify_ssl: {}'.format(self.turbonomic_rest_endpoint, CONF.turbonomic_verify_ssl))
 
     def select_destinations(self, context, spec_obj):
         self.notifier.info(context, 'turbonomic_scheduler.select_destinations.start',
@@ -112,28 +116,29 @@ class TurbonomicScheduler(driver.Scheduler):
         return dests
 
     def login(self):
-        LOG.info('Logging to {}'.format(self.vmt_url + 'login'))
-        auth_response = requests.post(self.vmt_url + "login", {'username': self.auth[0], 'password': self.auth[1]}, verify = self.verify_ssl)
-        self.j_session_id = auth_response.cookies['JSESSIONID']
+        LOG.info('Logging to {}'.format(self.turbonomic_rest_endpoint + 'login'))
+        auth_response = requests.post(self.turbonomic_rest_endpoint + "login", {'username': self.auth[0], 'password': self.auth[1]}, verify = self.verify_ssl)
         if auth_response.status_code == 200:
+            self.j_session_id = auth_response.cookies['JSESSIONID']
             LOG.info('Authenticated as {}'.format(self.auth[0]))
         else:
             LOG.info('Error authenticating as {}'.format(self.auth[0]))
             raise Exception('Authentication error')
 
     def get_template_uuid(self, template_name):
-        templates_response = requests.get(self.vmt_url + '/templates', cookies={'JSESSIONID': self.j_session_id}, verify = self.verify_ssl)
+        templates_response = requests.get(self.turbonomic_rest_endpoint + 'templates', cookies={'JSESSIONID': self.j_session_id}, verify = self.verify_ssl)
         templates = json.loads(templates_response.content)
         uuid = ''
         for template in templates:
-            if template_name in template['displayName']:
-                uuid = template['uuid']
+            if template_name in template.get('displayName', ''):
+                uuid = template.get('uuid', '')
 
+        if uuid == '':
+            raise Exception('No template found for {}'.format(template_name))
         return uuid
 
     def create_reservation(self, spec_obj):
-        self.reservationName = "Reservation-" + str(uuid.uuid4())
-        self.vmPrefix = "VMTReservation"
+        self.reservationName = "OpenStack-Placement-Request-" + str(uuid.uuid4())
         self.flavor_name = spec_obj.flavor.name
         if 'id' in spec_obj.image:
             self.deploymentProfile = spec_obj.image.id
@@ -182,7 +187,7 @@ class TurbonomicScheduler(driver.Scheduler):
 
         LOG.info('Placement json: {}'.format(placement))
 
-        placement_response = requests.post(self.vmt_url + '/reservations', data=placement, cookies={'JSESSIONID': self.j_session_id},
+        placement_response = requests.post(self.turbonomic_rest_endpoint + 'reservations', data=placement, cookies={'JSESSIONID': self.j_session_id},
                                            headers={'content-type': 'application/json'}, verify = self.verify_ssl)
 
         if placement_response.status_code == 200:
