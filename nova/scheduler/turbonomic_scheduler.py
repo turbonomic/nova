@@ -113,16 +113,17 @@ class TurbonomicScheduler(driver.Scheduler):
             host_info = []
 
         destinations = []
+
         for host_item in host_info:
             hostname = host_item.host
             nodename = host_item.nodename
-            if hostname in selected_hosts:
-                vmt_host = {"host": hostname, "nodename": nodename, "limits": {}}
-                destinations.append(vmt_host)
+            for selected_host in selected_hosts:
+                if hostname == selected_host:
+                    vmt_host = {"host": hostname, "nodename": nodename, "limits": {}}
+                    destinations.append(vmt_host)
 
-        dests = [dict(host=host.get('host'), nodename=host.get('nodename'), limits=host.get('limits')) for host in destinations]
-        LOG.info('Destinations: {}'.format(str( dests )))
-        return dests
+        LOG.info('Destinations: {}'.format(str( destinations )))
+        return destinations
 
     def login(self):
         LOG.info('Logging in to {}'.format(self.turbonomic_rest_endpoint + 'login'))
@@ -253,21 +254,22 @@ class TurbonomicScheduler(driver.Scheduler):
                 LOG.info('Placement obj: {}'.format(str(placement)))
                 if placement['status'] == 'PLACEMENT_SUCCEEDED':
                     if 'demandEntities' in placement:
-                        demandEntity = placement['demandEntities'][0]
-                        if 'placements' in demandEntity:
-                            placements = demandEntity['placements']
-                            if 'computeResources' in placements:
-                                computeResources = placements['computeResources']
-                                for cr in computeResources:
-                                    if 'provider' in cr:
-                                        provider = cr['provider']
-                                        if provider['className'] == 'PhysicalMachine':
-                                            LOG.info('Appending host: {}'.format(provider['displayName']))
-                                            selected_hosts.append(provider['displayName'])
+                        demand_entities = placement['demandEntities']
+                        for demand_entity in demand_entities:
+                            if 'placements' in demand_entity:
+                                placements = demand_entity['placements']
+                                if 'computeResources' in placements:
+                                    compute_resources = placements['computeResources']
+                                    for cr in compute_resources:
+                                        if 'provider' in cr:
+                                            provider = cr['provider']
+                                            if provider['className'] == 'PhysicalMachine':
+                                                LOG.info('Appending host: {}'.format(provider['displayName']))
+                                                selected_hosts.append(provider['displayName'])
+                                else:
+                                    LOG.info('No compute resource found in placements')
                             else:
-                                LOG.info('No compute resource found in placements')
-                        else:
-                            LOG.info('No placement found')
+                                LOG.info('No placement found')
                     else:
                         LOG.info('No demand entities found')
                 else:
