@@ -236,7 +236,13 @@ def after_VBD_create(vbd_ref, vbd_rec):
     is created.
     """
     vbd_rec['currently_attached'] = False
-    vbd_rec['device'] = ''
+
+    # TODO(snikitin): Find a better way for generating of device name.
+    # Usually 'userdevice' has numeric values like '1', '2', '3', etc.
+    # Ideally they should be transformed to something like 'xvda', 'xvdb',
+    # 'xvdx', etc. But 'userdevice' also may be 'autodetect', 'fake' or even
+    # unset. We should handle it in future.
+    vbd_rec['device'] = vbd_rec.get('userdevice', '')
     vbd_rec.setdefault('other_config', {})
 
     vm_ref = vbd_rec['VM']
@@ -781,7 +787,8 @@ class SessionBase(object):
             zlib.compress(("dom_id: %s" % dom_id).encode('utf-8')))
 
     def _plugin_dom0_plugin_version_get_version(self, method, args):
-        return pickle.dumps("2.0")
+        return pickle.dumps(
+            xenapi_session.XenAPISession.PLUGIN_REQUIRED_VERSION)
 
     def _plugin_xenhost_query_gc(self, method, args):
         return pickle.dumps("False")
@@ -834,6 +841,19 @@ class SessionBase(object):
     def VM_pause(self, session, vm_ref):
         db_ref = _db_content['VM'][vm_ref]
         db_ref['power_state'] = 'Paused'
+
+    def VM_query_data_source(self, session, vm_ref, field):
+        vm = {'cpu0': 0.11,
+              'cpu1': 0.22,
+              'cpu2': 0.33,
+              'cpu3': 0.44,
+              'memory': 8 * units.Gi,                # 8GB in bytes
+              'memory_internal_free': 5 * units.Mi,  # 5GB in kilobytes
+              'vif_0_rx': 50,
+              'vif_0_tx': 100,
+              'vbd_0_read': 50,
+              'vbd_0_write': 100}
+        return vm.get(field, 0)
 
     def pool_eject(self, session, host_ref):
         pass

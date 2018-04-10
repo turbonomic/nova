@@ -30,10 +30,10 @@ from nova.cells import messaging
 from nova.cells import rpc_driver as cells_rpc_driver
 from nova.cells import state as cells_state
 from nova.cells import utils as cells_utils
+from nova.compute import rpcapi as compute_rpcapi
 import nova.conf
 from nova import context
 from nova import exception
-from nova.i18n import _LW
 from nova import manager
 from nova import objects
 from nova.objects import base as base_obj
@@ -61,18 +61,18 @@ class CellsManager(manager.Manager):
     Scheduling requests get passed to the scheduler class.
     """
 
-    target = oslo_messaging.Target(version='1.37')
+    target = oslo_messaging.Target(version='1.38')
 
     def __init__(self, *args, **kwargs):
-        LOG.warning(_LW('The cells feature of Nova is considered experimental '
-                        'by the OpenStack project because it receives much '
-                        'less testing than the rest of Nova. This may change '
-                        'in the future, but current deployers should be aware '
-                        'that the use of it in production right now may be '
-                        'risky. Also note that cells does not currently '
-                        'support rolling upgrades, it is assumed that cells '
-                        'deployments are upgraded lockstep so n-1 cells '
-                        'compatibility does not work.'))
+        LOG.warning('The cells feature of Nova is considered experimental '
+                    'by the OpenStack project because it receives much '
+                    'less testing than the rest of Nova. This may change '
+                    'in the future, but current deployers should be aware '
+                    'that the use of it in production right now may be '
+                    'risky. Also note that cells does not currently '
+                    'support rolling upgrades, it is assumed that cells '
+                    'deployments are upgraded lockstep so n-1 cells '
+                    'compatibility does not work.')
         # Mostly for tests.
         cell_state_manager = kwargs.pop('cell_state_manager', None)
         super(CellsManager, self).__init__(service_name='cells',
@@ -313,7 +313,7 @@ class CellsManager(manager.Manager):
     @oslo_messaging.expected_exceptions(exception.CellRoutingInconsistency)
     def proxy_rpc_to_manager(self, ctxt, topic, rpc_message, call, timeout):
         """Proxy an RPC message as-is to a manager."""
-        compute_topic = CONF.compute_topic
+        compute_topic = compute_rpcapi.RPC_TOPIC
         cell_and_host = topic[len(compute_topic) + 1:]
         cell_name, host_name = cells_utils.split_cell_and_item(cell_and_host)
         response = self.msg_runner.proxy_rpc_to_manager(ctxt, cell_name,
@@ -356,7 +356,7 @@ class CellsManager(manager.Manager):
 
     @oslo_messaging.expected_exceptions(exception.CellRoutingInconsistency)
     def compute_node_get(self, ctxt, compute_id):
-        """Get a compute node by ID in a specific cell."""
+        """Get a compute node by ID or UUID in a specific cell."""
         cell_name, compute_id = cells_utils.split_cell_and_item(
                 compute_id)
         response = self.msg_runner.compute_node_get(ctxt, cell_name,
@@ -578,9 +578,9 @@ class CellsManager(manager.Manager):
         elif len(keypairs) > 1:
             cell_names = ', '.join([resp.cell_name for resp in responses
                                     if resp.value is not None])
-            LOG.warning(_LW("The same keypair name '%(name)s' exists in the "
-                            "following cells: %(cell_names)s. The keypair "
-                            "value from the first cell is returned."),
+            LOG.warning("The same keypair name '%(name)s' exists in the "
+                        "following cells: %(cell_names)s. The keypair "
+                        "value from the first cell is returned.",
                         {'name': name, 'cell_names': cell_names})
 
         return keypairs[0]

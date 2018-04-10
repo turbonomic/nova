@@ -31,7 +31,6 @@ import six
 import nova.conf
 from nova import exception
 from nova.i18n import _
-from nova.i18n import _LE, _LI, _LW
 from nova import image
 from nova import keymgr
 from nova import utils
@@ -118,7 +117,8 @@ class Image(object):
         pass
 
     def libvirt_info(self, disk_bus, disk_dev, device_type, cache_mode,
-                     extra_specs, hypervisor_version, boot_order=None):
+                     extra_specs, hypervisor_version, boot_order=None,
+                     disk_unit=None):
         """Get `LibvirtConfigGuestDisk` filled for this image.
 
         :disk_dev: Disk bus device name
@@ -144,9 +144,23 @@ class Image(object):
         info.source_path = self.path
         info.boot_order = boot_order
 
+        if disk_bus == 'scsi':
+            self.disk_scsi(info, disk_unit)
+
         self.disk_qos(info, extra_specs)
 
         return info
+
+    def disk_scsi(self, info, disk_unit):
+        # The driver is responsible to create the SCSI controller
+        # at index 0.
+        info.device_addr = vconfig.LibvirtConfigGuestDeviceAddressDrive()
+        info.device_addr.controller = 0
+        if disk_unit is not None:
+            # In order to allow up to 256 disks handled by one
+            # virtio-scsi controller, the device addr should be
+            # specified.
+            info.device_addr.unit = disk_unit
 
     def disk_qos(self, info, extra_specs):
         tune_items = ['disk_read_bytes_sec', 'disk_read_iops_sec',
@@ -248,8 +262,8 @@ class Image(object):
             can_fallocate = not err
             self.__class__.can_fallocate = can_fallocate
             if not can_fallocate:
-                LOG.warning(_LW('Unable to preallocate image at path: '
-                                '%(path)s'), {'path': self.path})
+                LOG.warning('Unable to preallocate image at path: %(path)s',
+                            {'path': self.path})
         return can_fallocate
 
     def verify_base_size(self, base, size, base_size=0):
@@ -274,18 +288,27 @@ class Image(object):
             base_size = self.get_disk_size(base)
 
         if size < base_size:
-            msg = _LE('%(base)s virtual size %(base_size)s '
-                      'larger than flavor root disk size %(size)s')
-            LOG.error(msg, {'base': base,
-                            'base_size': base_size,
-                            'size': size})
+            LOG.error('%(base)s virtual size %(base_size)s '
+                      'larger than flavor root disk size %(size)s',
+                      {'base': base,
+                       'base_size': base_size,
+                       'size': size})
             raise exception.FlavorDiskSmallerThanImage(
                 flavor_size=size, image_size=base_size)
 
     def get_disk_size(self, name):
         return disk.get_disk_size(name)
 
+    @abc.abstractmethod
     def snapshot_extract(self, target, out_format):
+        """Extract a snapshot of the image.
+
+        This is used during cold (offline) snapshots. Live snapshots
+        while the guest is still running are handled separately.
+
+        :param target: The target path for the image snapshot.
+        :param out_format: The image snapshot format.
+        """
         raise NotImplementedError()
 
     def _get_driver_format(self):
@@ -375,7 +398,10 @@ class Image(object):
 
     def direct_snapshot(self, context, snapshot_name, image_format, image_id,
                         base_image_id):
-        """Prepare a snapshot for direct reference from glance
+        """Prepare a snapshot for direct reference from glance.
+
+        The implementation of this method is optional and therefore is
+        not an abstractmethod.
 
         :raises: exception.ImageUnacceptable if it cannot be
                  referenced directly in the specified image format
@@ -396,6 +422,7 @@ class Image(object):
         """Get an image's name of a base file."""
         return os.path.split(base)[-1]
 
+    @abc.abstractmethod
     def get_model(self, connection):
         """Get the image information model
 
@@ -470,10 +497,9 @@ class Flat(Image):
             data = images.qemu_img_info(self.path)
             return data.file_format
         except exception.InvalidDiskInfo as e:
-            LOG.info(_LI('Failed to get image info from path %(path)s; '
-                         'error: %(error)s'),
-                      {'path': self.path,
-                       'error': e})
+            LOG.info('Failed to get image info from path %(path)s; '
+                     'error: %(error)s',
+                     {'path': self.path, 'error': e})
             return 'raw'
 
     def _supports_encryption(self):
@@ -715,8 +741,8 @@ class Lvm(Image):
                             self.ephemeral_key_uuid).get_encoded()
                 except Exception:
                     with excutils.save_and_reraise_exception():
-                        LOG.error(_LE("Failed to retrieve ephemeral encryption"
-                                      " key"))
+                        LOG.error("Failed to retrieve ephemeral "
+                                  "encryption key")
             else:
                 raise exception.InternalError(
                     _("Instance disk to be encrypted but no context provided"))
@@ -763,7 +789,7 @@ class Rbd(Image):
 
     SUPPORTS_CLONE = True
 
-    def __init__(self, instance=None, disk_name=None, path=None, **kwargs):
+    def __init__(self, instance=None, disk_name=None, path=None):
         if not CONF.libvirt.images_rbd_pool:
             raise RuntimeError(_('You should specify'
                                  ' images_rbd_pool'
@@ -797,7 +823,8 @@ class Rbd(Image):
         self.discard_mode = CONF.libvirt.hw_disk_discard
 
     def libvirt_info(self, disk_bus, disk_dev, device_type, cache_mode,
-            extra_specs, hypervisor_version, boot_order=None):
+                     extra_specs, hypervisor_version, boot_order=None,
+                     disk_unit=None):
         """Get `LibvirtConfigGuestDisk` filled for this image.
 
         :disk_dev: Disk bus device name
@@ -832,6 +859,9 @@ class Rbd(Image):
         if auth_enabled:
             info.auth_secret_type = 'ceph'
             info.auth_secret_uuid = CONF.libvirt.rbd_secret_uuid
+
+        if disk_bus == 'scsi':
+            self.disk_scsi(info, disk_unit)
 
         self.disk_qos(info, extra_specs)
 

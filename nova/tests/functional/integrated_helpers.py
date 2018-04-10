@@ -27,6 +27,7 @@ import nova.conf
 import nova.image.glance
 from nova import test
 from nova.tests import fixtures as nova_fixtures
+from nova.tests.functional.api import client as api_client
 from nova.tests.unit import cast_as_call
 import nova.tests.unit.image.fake
 from nova.tests import uuidsentinel as uuids
@@ -76,9 +77,12 @@ class _IntegratedTestBase(test.TestCase):
         self.flags(use_neutron=self.USE_NEUTRON)
 
         nova.tests.unit.image.fake.stub_out_image_service(self)
-        self._setup_services()
 
-        self.useFixture(cast_as_call.CastAsCall(self.stubs))
+        self.useFixture(cast_as_call.CastAsCall(self))
+        placement = self.useFixture(nova_fixtures.PlacementFixture())
+        self.placement_api = placement.api
+
+        self._setup_services()
 
         self.addCleanup(nova.tests.unit.image.fake.FakeImageService_reset)
 
@@ -200,7 +204,7 @@ class _IntegratedTestBase(test.TestCase):
         return server
 
     def _check_api_endpoint(self, endpoint, expected_middleware):
-        app = self.api_fixture.osapi.app.get((None, '/v2'))
+        app = self.api_fixture.app().get((None, '/v2'))
 
         while getattr(app, 'application', False):
             for middleware in expected_middleware:
@@ -216,24 +220,30 @@ class _IntegratedTestBase(test.TestCase):
 
 
 class InstanceHelperMixin(object):
-    def _wait_for_state_change(self, admin_api, server, expected_status,
-                               max_retries=10):
+    def _wait_for_server_parameter(self, admin_api, server, expected_params,
+                                   max_retries=10):
         retry_count = 0
         while True:
             server = admin_api.get_server(server['id'])
-            if server['status'] == expected_status:
+            if all([server[attr] == expected_params[attr]
+                    for attr in expected_params]):
                 break
             retry_count += 1
             if retry_count == max_retries:
                 self.fail('Wait for state change failed, '
-                          'expected_status=%s, actual_status=%s'
-                          % (expected_status, server['status']))
+                          'expected_params=%s, server=%s'
+                          % (expected_params, server))
             time.sleep(0.5)
 
         return server
 
+    def _wait_for_state_change(self, admin_api, server, expected_status,
+                               max_retries=10):
+        return self._wait_for_server_parameter(
+            admin_api, server, {'status': expected_status}, max_retries)
+
     def _build_minimal_create_server_request(self, api, name, image_uuid=None,
-                                             flavor_id=None):
+                                             flavor_id=None, networks=None):
         server = {}
 
         # We now have a valid imageId
@@ -244,4 +254,76 @@ class InstanceHelperMixin(object):
             flavor_id = api.get_flavors()[1]['id']
         server['flavorRef'] = ('http://fake.server/%s' % flavor_id)
         server['name'] = name
+        if networks is not None:
+            server['networks'] = networks
         return server
+
+    def _wait_until_deleted(self, server):
+        try:
+            for i in range(40):
+                server = self.api.get_server(server['id'])
+                if server['status'] == 'ERROR':
+                    self.fail('Server went to error state instead of'
+                              'disappearing.')
+                time.sleep(0.5)
+
+            self.fail('Server failed to delete.')
+        except api_client.OpenStackApiNotFoundException:
+            return
+
+    def _wait_for_action_fail_completion(
+            self, server, expected_action, event_name, api=None):
+        """Polls instance action events for the given instance, action and
+        action event name until it finds the action event with an error
+        result.
+        """
+        if api is None:
+            api = self.api
+        completion_event = None
+        for attempt in range(10):
+            actions = api.get_instance_actions(server['id'])
+            # Look for the migrate action.
+            for action in actions:
+                if action['action'] == expected_action:
+                    events = (
+                        api.api_get(
+                            '/servers/%s/os-instance-actions/%s' %
+                            (server['id'], action['request_id'])
+                        ).body['instanceAction']['events'])
+                    # Look for the action event being in error state.
+                    for event in events:
+                        if (event['event'] == event_name and
+                                event['result'] is not None and
+                                event['result'].lower() == 'error'):
+                            completion_event = event
+                            # Break out of the events loop.
+                            break
+                    if completion_event:
+                        # Break out of the actions loop.
+                        break
+            # We didn't find the completion event yet, so wait a bit.
+            time.sleep(0.5)
+
+        if completion_event is None:
+            self.fail('Timed out waiting for %s failure event. Current '
+                      'instance actions: %s' % (event_name, actions))
+
+    def _wait_for_migration_status(self, server, expected_status):
+        """Waits for a migration record with the given status to be found
+        for the given server, else the test fails. The migration record, if
+        found, is returned.
+        """
+        api = getattr(self, 'admin_api', None)
+        if api is None:
+            api = self.api
+
+        for attempt in range(10):
+            migrations = api.api_get('/os-migrations').body['migrations']
+            for migration in migrations:
+                if (migration['instance_uuid'] == server['id'] and
+                        migration['status'].lower() ==
+                        expected_status.lower()):
+                    return migration
+            time.sleep(0.5)
+        self.fail('Timed out waiting for migration with status "%s" for '
+                  'instance: %s' % (expected_status, server['id']))

@@ -16,7 +16,11 @@
 import collections
 import itertools
 
+from oslo_log import log as logging
+
 from nova.scheduler import filter_scheduler
+
+LOG = logging.getLogger(__name__)
 
 
 class CachingScheduler(filter_scheduler.FilterScheduler):
@@ -53,9 +57,13 @@ class CachingScheduler(filter_scheduler.FilterScheduler):
     refreshed.
     """
 
+    USES_ALLOCATION_CANDIDATES = False
+
     def __init__(self, *args, **kwargs):
         super(CachingScheduler, self).__init__(*args, **kwargs)
         self.all_host_states = None
+        LOG.warning('CachingScheduler is deprecated in Pike and will be '
+                    'removed in a subsequent release.')
 
     def run_periodic_tasks(self, context):
         """Called from a periodic tasks in the manager."""
@@ -65,7 +73,7 @@ class CachingScheduler(filter_scheduler.FilterScheduler):
         # fetch the list of hosts.
         self.all_host_states = self._get_up_hosts(elevated)
 
-    def _get_all_host_states(self, context, spec_obj):
+    def _get_all_host_states(self, context, spec_obj, provider_summaries):
         """Called from the filter scheduler, in a template pattern."""
         if self.all_host_states is None:
             # NOTE(johngarbutt) We only get here when we a scheduler request

@@ -134,7 +134,7 @@ class TestOpenStackClient(object):
         response = requests.request(method, url, data=body, headers=_headers)
         return response
 
-    def _authenticate(self):
+    def _authenticate(self, retry_count=0):
         if self.auth_result:
             return self.auth_result
 
@@ -149,8 +149,15 @@ class TestOpenStackClient(object):
         LOG.debug("%(auth_uri)s => code %(http_status)s",
                   {'auth_uri': auth_uri, 'http_status': http_status})
 
+        # NOTE(cdent): This is a workaround for an issue where the placement
+        # API fixture may respond when a request was supposed to go to the
+        # compute API fixture. Retry a few times, hoping to hit the right
+        # fixture.
         if http_status == 401:
-            raise OpenStackApiAuthenticationException(response=response)
+            if retry_count <= 3:
+                return self._authenticate(retry_count=retry_count + 1)
+            else:
+                raise OpenStackApiAuthenticationException(response=response)
 
         self.auth_result = response.headers
         return self.auth_result
@@ -191,7 +198,7 @@ class TestOpenStackClient(object):
                     raise OpenStackApiAuthorizationException(response=response)
                 else:
                     raise OpenStackApiException(
-                        message="Unexpected status code",
+                        message="Unexpected status code: %s" % response.text,
                         response=response)
 
         return response
@@ -213,7 +220,7 @@ class TestOpenStackClient(object):
             headers['Content-Type'] = 'application/json'
             kwargs['body'] = jsonutils.dumps(body)
 
-        kwargs.setdefault('check_response_status', [200, 202])
+        kwargs.setdefault('check_response_status', [200, 201, 202])
         return APIResponse(self.api_request(relative_uri, **kwargs))
 
     def api_put(self, relative_uri, body, **kwargs):
@@ -271,11 +278,20 @@ class TestOpenStackClient(object):
     def put_server(self, server_id, server):
         return self.api_put('/servers/%s' % server_id, server).body
 
-    def post_server_action(self, server_id, data):
-        return self.api_post('/servers/%s/action' % server_id, data).body
+    def post_server_action(self, server_id, data, **kwargs):
+        return self.api_post(
+            '/servers/%s/action' % server_id, data, **kwargs).body
 
     def delete_server(self, server_id):
         return self.api_delete('/servers/%s' % server_id)
+
+    def force_down_service(self, host, binary, forced_down):
+        req = {
+            "host": host,
+            "binary": binary,
+            "forced_down": forced_down
+        }
+        return self.api_put('/os-services/force-down', req).body['service']
 
     def get_image(self, image_id):
         return self.api_get('/images/%s' % image_id).body['image']
@@ -289,6 +305,16 @@ class TestOpenStackClient(object):
 
     def delete_image(self, image_id):
         return self.api_delete('/images/%s' % image_id)
+
+    def put_image_meta_key(self, image_id, key, value):
+        """Creates or updates a given image metadata key/value pair."""
+        req_body = {
+            'meta': {
+                key: value
+            }
+        }
+        return self.api_put('/images/%s/metadata/%s' % (image_id, key),
+                            req_body)
 
     def get_flavor(self, flavor_id):
         return self.api_get('/flavors/%s' % flavor_id).body['flavor']
@@ -394,5 +420,56 @@ class TestOpenStackClient(object):
     def delete_aggregate(self, aggregate_id):
         self.api_delete('/os-aggregates/%s' % aggregate_id)
 
+    def add_host_to_aggregate(self, aggregate_id, host):
+        return self.api_post('/os-aggregates/%s/action' % aggregate_id,
+                             {'add_host': {'host': host}})
+
     def get_limits(self):
         return self.api_get('/limits').body['limits']
+
+    def put_server_tags(self, server_id, tags):
+        """Put (or replace) a list of tags on the given server.
+
+        Returns the list of tags from the response.
+        """
+        return self.api_put('/servers/%s/tags' % server_id,
+                            {'tags': tags}).body['tags']
+
+    def get_port_interfaces(self, server_id):
+        return self.api_get('/servers/%s/os-interface' %
+                            (server_id)).body['interfaceAttachments']
+
+    def detach_interface(self, server_id, port_id):
+        return self.api_delete('/servers/%s/os-interface/%s' %
+                               (server_id, port_id))
+
+    def get_services(self, binary=None, host=None):
+        url = '/os-services?'
+        if binary:
+            url += 'binary=%s&' % binary
+        if host:
+            url += 'host=%s&' % host
+        return self.api_get(url).body['services']
+
+    def put_service(self, service_id, req):
+        return self.api_put(
+            '/os-services/%s' % service_id, req).body['service']
+
+    def post_keypair(self, keypair):
+        return self.api_post('/os-keypairs', keypair).body['keypair']
+
+    def get_active_migrations(self, server_id):
+        return self.api_get('/servers/%s/migrations' %
+                            server_id).body['migrations']
+
+    def get_migrations(self):
+        return self.api_get('os-migrations').body['migrations']
+
+    def force_complete_migration(self, server_id, migration_id):
+        return self.api_post(
+            '/servers/%s/migrations/%s/action' % (server_id, migration_id),
+            {'force_complete': None})
+
+    def delete_migration(self, server_id, migration_id):
+        return self.api_delete(
+            '/servers/%s/migrations/%s' % (server_id, migration_id))

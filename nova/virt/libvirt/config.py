@@ -824,6 +824,9 @@ class LibvirtConfigGuestDisk(LibvirtConfigGuestDevice):
         if self.boot_order:
             dev.append(etree.Element("boot", order=self.boot_order))
 
+        if self.device_addr:
+            dev.append(self.device_addr.format_dom())
+
         return dev
 
     def parse_dom(self, xmldoc):
@@ -1158,6 +1161,11 @@ class LibvirtConfigGuestDeviceAddress(LibvirtConfigObject):
             root_name='address', **kwargs)
         self.type = type
 
+    def format_dom(self):
+        xml = super(LibvirtConfigGuestDeviceAddress, self).format_dom()
+        xml.set("type", self.type)
+        return xml
+
     @staticmethod
     def parse_dom(xmldoc):
         addr_type = xmldoc.get('type')
@@ -1180,6 +1188,20 @@ class LibvirtConfigGuestDeviceAddressDrive(LibvirtConfigGuestDeviceAddress):
         self.target = None
         self.unit = None
 
+    def format_dom(self):
+        xml = super(LibvirtConfigGuestDeviceAddressDrive, self).format_dom()
+
+        if self.controller is not None:
+            xml.set("controller", str(self.controller))
+        if self.bus is not None:
+            xml.set("bus", str(self.bus))
+        if self.target is not None:
+            xml.set("target", str(self.target))
+        if self.unit is not None:
+            xml.set("unit", str(self.unit))
+
+        return xml
+
     def parse_dom(self, xmldoc):
         self.controller = xmldoc.get('controller')
         self.bus = xmldoc.get('bus')
@@ -1198,6 +1220,20 @@ class LibvirtConfigGuestDeviceAddressPCI(LibvirtConfigGuestDeviceAddress):
         self.bus = None
         self.slot = None
         self.function = None
+
+    def format_dom(self):
+        xml = super(LibvirtConfigGuestDeviceAddressPCI, self).format_dom()
+
+        if self.domain is not None:
+            xml.set("domain", str(self.domain))
+        if self.bus is not None:
+            xml.set("bus", str(self.bus))
+        if self.slot is not None:
+            xml.set("slot", str(self.slot))
+        if self.function is not None:
+            xml.set("function", str(self.function))
+
+        return xml
 
     def parse_dom(self, xmldoc):
         self.domain = xmldoc.get('domain')
@@ -2000,6 +2036,20 @@ class LibvirtConfigGuestFeaturePAE(LibvirtConfigGuestFeature):
                                                            **kwargs)
 
 
+class LibvirtConfigGuestFeatureKvmHidden(LibvirtConfigGuestFeature):
+
+    def __init__(self, **kwargs):
+        super(LibvirtConfigGuestFeatureKvmHidden, self).__init__("kvm",
+                                                                 **kwargs)
+
+    def format_dom(self):
+        root = super(LibvirtConfigGuestFeatureKvmHidden, self).format_dom()
+
+        root.append(etree.Element("hidden", state="on"))
+
+        return root
+
+
 class LibvirtConfigGuestFeatureHyperV(LibvirtConfigGuestFeature):
 
     # QEMU requires at least this value to be set
@@ -2337,7 +2387,7 @@ class LibvirtConfigNodeDevice(LibvirtConfigObject):
                 self.name = c.text
             elif c.tag == "parent":
                 self.parent = c.text
-            elif c.tag == "capability" and c.get("type") == 'pci':
+            elif c.tag == "capability" and c.get("type") in ['pci', 'net']:
                 pcicap = LibvirtConfigNodeDevicePciCap()
                 pcicap.parse_dom(c)
                 self.pci_capability = pcicap
@@ -2358,7 +2408,11 @@ class LibvirtConfigNodeDevicePciCap(LibvirtConfigObject):
         self.vendor = None
         self.vendor_id = None
         self.numa_node = None
-        self.fun_capability = list()
+        self.fun_capability = []
+        self.interface = None
+        self.address = None
+        self.link_state = None
+        self.features = []
 
     def parse_dom(self, xmldoc):
         super(LibvirtConfigNodeDevicePciCap, self).parse_dom(xmldoc)
@@ -2380,6 +2434,14 @@ class LibvirtConfigNodeDevicePciCap(LibvirtConfigObject):
                 self.vendor_id = int(c.get('id'), 16)
             elif c.tag == "numa":
                 self.numa_node = int(c.get('node'))
+            elif c.tag == "interface":
+                self.interface = c.text
+            elif c.tag == "address":
+                self.address = c.text
+            elif c.tag == "link":
+                self.link_state = c.get('state')
+            elif c.tag == "feature":
+                self.features.append(c.get('name'))
             elif c.tag == "capability" and c.get('type') in \
                             ('virt_functions', 'phys_function'):
                 funcap = LibvirtConfigNodeDevicePciSubFunctionCap()

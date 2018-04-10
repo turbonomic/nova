@@ -22,13 +22,10 @@ POLICY_ROOT = 'os_compute_api:os-pause-server:%s'
 
 
 pause_server_policies = [
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'discoverable',
-        check_str=base.RULE_ANY),
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         POLICY_ROOT % 'pause',
         base.RULE_ADMIN_OR_OWNER,
-        "Pause a server.",
+        "Pause a server",
         [
             {
                 'path': '/servers/{server_id}/action (pause)',
@@ -36,10 +33,10 @@ pause_server_policies = [
             }
         ]
     ),
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         POLICY_ROOT % 'unpause',
         base.RULE_ADMIN_OR_OWNER,
-        "Unpause a paused server.",
+        "Unpause a paused server",
         [
             {
                 'path': '/servers/{server_id}/action (unpause)',

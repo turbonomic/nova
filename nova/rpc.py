@@ -230,9 +230,9 @@ def if_notifications_enabled(f):
 
 def create_transport(url):
     exmods = get_allowed_exmods()
-    return messaging.get_transport(CONF,
-                                   url=url,
-                                   allowed_remote_exmods=exmods)
+    return messaging.get_rpc_transport(CONF,
+                                       url=url,
+                                       allowed_remote_exmods=exmods)
 
 
 class LegacyValidatingNotifier(object):
@@ -276,6 +276,8 @@ class LegacyValidatingNotifier(object):
         'compute.instance.finish_resize.start',
         'compute.instance.live.migration.abort.start',
         'compute.instance.live.migration.abort.end',
+        'compute.instance.live.migration.force.complete.start',
+        'compute.instance.live.migration.force.complete.end',
         'compute.instance.live_migration.post.dest.end',
         'compute.instance.live_migration.post.dest.start',
         'compute.instance.live_migration._post.end',
@@ -338,6 +340,7 @@ class LegacyValidatingNotifier(object):
         'compute.instance.volume.attach',
         'compute.instance.volume.detach',
         'compute.libvirt.error',
+        'compute.metrics.update',
         'compute_task.build_instances',
         'compute_task.migrate_server',
         'compute_task.rebuild_server',
@@ -410,24 +413,11 @@ class ClientRouter(periodic_task.PeriodicTasks):
         # Prevent this empty context from overwriting the thread local copy
         self.run_periodic_tasks(nova.context.RequestContext(overwrite=False))
 
-    def _client(self, context, transport=None):
+    def client(self, context):
+        transport = context.mq_connection
         if transport:
             return messaging.RPCClient(transport, self.target,
                                        version_cap=self.version_cap,
                                        serializer=self.serializer)
-        else:
-            return self.default_client
-
-    def by_instance(self, context, instance):
-        """Deprecated."""
-        if context.mq_connection:
-            return self._client(context, transport=context.mq_connection)
-        else:
-            return self.default_client
-
-    def by_host(self, context, host):
-        """Deprecated."""
-        if context.mq_connection:
-            return self._client(context, transport=context.mq_connection)
         else:
             return self.default_client

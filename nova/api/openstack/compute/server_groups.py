@@ -15,6 +15,8 @@
 
 """The Server Group API Extension."""
 
+import collections
+
 from oslo_log import log as logging
 import webob
 from webob import exc
@@ -25,6 +27,8 @@ from nova.api.openstack.compute.schemas import server_groups as schema
 from nova.api.openstack import extensions
 from nova.api.openstack import wsgi
 from nova.api import validation
+import nova.conf
+from nova import context as nova_context
 import nova.exception
 from nova.i18n import _
 from nova import objects
@@ -32,13 +36,47 @@ from nova.policies import server_groups as sg_policies
 
 LOG = logging.getLogger(__name__)
 
-ALIAS = "os-server-groups"
+CONF = nova.conf.CONF
 
 
 def _authorize_context(req, action):
     context = req.environ['nova.context']
     context.can(sg_policies.POLICY_ROOT % action)
     return context
+
+
+def _get_not_deleted(context, uuids):
+    mappings = objects.InstanceMappingList.get_by_instance_uuids(
+        context, uuids)
+    inst_by_cell = collections.defaultdict(list)
+    cell_mappings = {}
+    found_inst_uuids = []
+
+    # Get a master list of cell mappings, and a list of instance
+    # uuids organized by cell
+    for im in mappings:
+        if not im.cell_mapping:
+            # Not scheduled yet, so just throw it in the final list
+            # and move on
+            found_inst_uuids.append(im.instance_uuid)
+            continue
+        if im.cell_mapping.uuid not in cell_mappings:
+            cell_mappings[im.cell_mapping.uuid] = im.cell_mapping
+        inst_by_cell[im.cell_mapping.uuid].append(im.instance_uuid)
+
+    # Query each cell for the instances that are inside, building
+    # a list of non-deleted instance uuids.
+    for cell_uuid, cell_mapping in cell_mappings.items():
+        inst_uuids = inst_by_cell[cell_uuid]
+        LOG.debug('Querying cell %(cell)s for %(num)i instances',
+                  {'cell': cell_mapping.identity, 'num': len(uuids)})
+        filters = {'uuid': inst_uuids, 'deleted': False}
+        with nova_context.target_cell(context, cell_mapping) as ctx:
+            found_inst_uuids.extend([
+                inst.uuid for inst in objects.InstanceList.get_by_filters(
+                    ctx, filters=filters)])
+
+    return found_inst_uuids
 
 
 class ServerGroupController(wsgi.Controller):
@@ -59,10 +97,7 @@ class ServerGroupController(wsgi.Controller):
         members = []
         if group.members:
             # Display the instances that are not deleted.
-            filters = {'uuid': group.members, 'deleted': False}
-            instances = objects.InstanceList.get_by_filters(
-                context, filters=filters)
-            members = [instance.uuid for instance in instances]
+            members = _get_not_deleted(context, group.members)
         server_group['members'] = members
         # Add project id information to the response data for
         # API version v2.13
@@ -90,27 +125,10 @@ class ServerGroupController(wsgi.Controller):
             sg = objects.InstanceGroup.get_by_uuid(context, id)
         except nova.exception.InstanceGroupNotFound as e:
             raise webob.exc.HTTPNotFound(explanation=e.format_message())
-
-        quotas = objects.Quotas(context=context)
-        project_id, user_id = objects.quotas.ids_from_server_group(context, sg)
-        try:
-            # We have to add the quota back to the user that created
-            # the server group
-            quotas.reserve(project_id=project_id,
-                           user_id=user_id, server_groups=-1)
-        except Exception:
-            quotas = None
-            LOG.exception("Failed to update usages deallocating server group")
-
         try:
             sg.destroy()
         except nova.exception.InstanceGroupNotFound as e:
-            if quotas:
-                quotas.rollback()
             raise webob.exc.HTTPNotFound(explanation=e.format_message())
-
-        if quotas:
-            quotas.commit()
 
     @extensions.expected_errors(())
     def index(self, req):
@@ -129,16 +147,15 @@ class ServerGroupController(wsgi.Controller):
 
     @wsgi.Controller.api_version("2.1")
     @extensions.expected_errors((400, 403))
-    @validation.schema(schema.create, "2.1", "2.14")
+    @validation.schema(schema.create, "2.0", "2.14")
     @validation.schema(schema.create_v215, "2.15")
     def create(self, req, body):
         """Creates a new server group."""
         context = _authorize_context(req, 'create')
 
-        quotas = objects.Quotas(context=context)
         try:
-            quotas.reserve(project_id=context.project_id,
-                           user_id=context.user_id, server_groups=1)
+            objects.Quotas.check_deltas(context, {'server_groups': 1},
+                                        context.project_id, context.user_id)
         except nova.exception.OverQuota:
             msg = _("Quota exceeded, too many server groups.")
             raise exc.HTTPForbidden(explanation=msg)
@@ -152,24 +169,20 @@ class ServerGroupController(wsgi.Controller):
             sg.policies = vals.get('policies')
             sg.create()
         except ValueError as e:
-            quotas.rollback()
             raise exc.HTTPBadRequest(explanation=e)
 
-        quotas.commit()
+        # NOTE(melwitt): We recheck the quota after creating the object to
+        # prevent users from allocating more resources than their allowed quota
+        # in the event of a race. This is configurable because it can be
+        # expensive if strict quota limits are not required in a deployment.
+        if CONF.quota.recheck_quota:
+            try:
+                objects.Quotas.check_deltas(context, {'server_groups': 0},
+                                            context.project_id,
+                                            context.user_id)
+            except nova.exception.OverQuota:
+                sg.destroy()
+                msg = _("Quota exceeded, too many server groups.")
+                raise exc.HTTPForbidden(explanation=msg)
+
         return {'server_group': self._format_server_group(context, sg, req)}
-
-
-class ServerGroups(extensions.V21APIExtensionBase):
-    """Server group support."""
-    name = "ServerGroups"
-    alias = ALIAS
-    version = 1
-
-    def get_resources(self):
-        res = extensions.ResourceExtension(
-                 ALIAS, controller=ServerGroupController(),
-                 member_actions={"action": "POST", })
-        return [res]
-
-    def get_controller_extensions(self):
-        return []

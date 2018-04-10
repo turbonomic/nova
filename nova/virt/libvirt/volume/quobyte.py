@@ -19,13 +19,12 @@ import os
 from oslo_concurrency import processutils
 from oslo_log import log as logging
 from oslo_utils import fileutils
+import psutil
 import six
 
 import nova.conf
 from nova import exception as nova_exception
 from nova.i18n import _
-from nova.i18n import _LE
-from nova.i18n import _LI
 from nova import utils
 from nova.virt.libvirt import utils as libvirt_utils
 from nova.virt.libvirt.volume import fs
@@ -44,16 +43,23 @@ def mount_volume(volume, mnt_base, configfile=None):
     """Wraps execute calls for mounting a Quobyte volume"""
     fileutils.ensure_tree(mnt_base)
 
-    command = ['mount.quobyte', volume, mnt_base]
+    # NOTE(kaisers): disable xattrs to speed up io as this omits
+    # additional metadata requests in the backend. xattrs can be
+    # enabled without issues but will reduce performance.
+    command = ['mount.quobyte', '--disable-xattrs', volume, mnt_base]
+    if os.path.exists(" /run/systemd/system"):
+        # Note(kaisers): with systemd this requires a separate CGROUP to
+        # prevent Nova service stop/restarts from killing the mount.
+        command = ['systemd-run', '--scope', '--user', 'mount.quobyte',
+                   '--disable-xattrs', volume, mnt_base]
     if configfile:
         command.extend(['-c', configfile])
 
     LOG.debug('Mounting volume %s at mount point %s ...',
               volume,
               mnt_base)
-    # Run mount command but do not fail on already mounted exit code
-    utils.execute(*command, check_exit_code=[0, 4])
-    LOG.info(_LI('Mounted volume: %s'), volume)
+    utils.execute(*command)
+    LOG.info('Mounted volume: %s', volume)
 
 
 def umount_volume(mnt_base):
@@ -62,28 +68,38 @@ def umount_volume(mnt_base):
         utils.execute('umount.quobyte', mnt_base)
     except processutils.ProcessExecutionError as exc:
         if 'Device or resource busy' in six.text_type(exc):
-            LOG.error(_LE("The Quobyte volume at %s is still in use."),
-                      mnt_base)
+            LOG.error("The Quobyte volume at %s is still in use.", mnt_base)
         else:
-            LOG.exception(_LE("Couldn't unmount the Quobyte Volume at %s"),
+            LOG.exception(_("Couldn't unmount the Quobyte Volume at %s"),
                           mnt_base)
 
 
-def validate_volume(mnt_base):
-    """Wraps execute calls for checking validity of a Quobyte volume"""
-    command = ['getfattr', "-n", "quobyte.info", mnt_base]
-    try:
-        utils.execute(*command)
-    except processutils.ProcessExecutionError as exc:
-        msg = (_("The mount %(mount_path)s is not a valid"
-                 " Quobyte volume. Error: %(exc)s")
-               % {'mount_path': mnt_base, 'exc': exc})
-        raise nova_exception.InternalError(msg)
-
-    if not os.access(mnt_base, os.W_OK | os.X_OK):
-        msg = (_LE("Volume is not writable. Please broaden the file"
-                   " permissions. Mount: %s") % mnt_base)
-        raise nova_exception.InternalError(msg)
+def validate_volume(mount_path):
+    """Runs a number of tests to be sure this is a (working) Quobyte mount"""
+    partitions = psutil.disk_partitions(all=True)
+    for p in partitions:
+        if mount_path != p.mountpoint:
+            continue
+        if p.device.startswith("quobyte@"):
+            statresult = os.stat(mount_path)
+            # Note(kaisers): Quobyte always shows mount points with size 0
+            if statresult.st_size == 0:
+                # client looks healthy
+                return  # we're happy here
+            else:
+                msg = (_("The mount %(mount_path)s is not a "
+                         "valid Quobyte volume. Stale mount?")
+                       % {'mount_path': mount_path})
+            raise nova_exception.InvalidVolume(msg)
+        else:
+            msg = (_("The mount %(mount_path)s is not a valid"
+                     " Quobyte volume according to partition list.")
+                   % {'mount_path': mount_path})
+            raise nova_exception.InvalidVolume(msg)
+    msg = (_("No matching Quobyte mount entry for %(mount_path)s"
+             " could be found for validation in partition list.")
+           % {'mount_path': mount_path})
+    raise nova_exception.InvalidVolume(msg)
 
 
 class LibvirtQuobyteVolumeDriver(fs.LibvirtBaseFileSystemVolumeDriver):
@@ -106,8 +122,8 @@ class LibvirtQuobyteVolumeDriver(fs.LibvirtBaseFileSystemVolumeDriver):
 
         return conf
 
-    @utils.synchronized('connect_volume')
-    def connect_volume(self, connection_info, disk_info):
+    @utils.synchronized('connect_qb_volume')
+    def connect_volume(self, connection_info, disk_info, instance):
         """Connect the volume."""
         data = connection_info['data']
         quobyte_volume = self._normalize_export(data['export'])
@@ -121,19 +137,19 @@ class LibvirtQuobyteVolumeDriver(fs.LibvirtBaseFileSystemVolumeDriver):
             except OSError as exc:
                 if exc.errno == errno.ENOTCONN:
                     mounted = False
-                    LOG.info(_LI('Fixing previous mount %s which was not'
-                                 ' unmounted correctly.'), mount_path)
+                    LOG.info('Fixing previous mount %s which was not'
+                             ' unmounted correctly.', mount_path)
                     umount_volume(mount_path)
 
         if not mounted:
             mount_volume(quobyte_volume,
-                                 mount_path,
-                                 CONF.libvirt.quobyte_client_cfg)
+                         mount_path,
+                         CONF.libvirt.quobyte_client_cfg)
 
         validate_volume(mount_path)
 
-    @utils.synchronized('connect_volume')
-    def disconnect_volume(self, connection_info, disk_dev):
+    @utils.synchronized('connect_qb_volume')
+    def disconnect_volume(self, connection_info, disk_dev, instance):
         """Disconnect the volume."""
 
         quobyte_volume = self._normalize_export(
@@ -143,7 +159,7 @@ class LibvirtQuobyteVolumeDriver(fs.LibvirtBaseFileSystemVolumeDriver):
         if libvirt_utils.is_mounted(mount_path, 'quobyte@' + quobyte_volume):
             umount_volume(mount_path)
         else:
-            LOG.info(_LI("Trying to disconnected unmounted volume at %s"),
+            LOG.info("Trying to disconnected unmounted volume at %s",
                      mount_path)
 
     def _normalize_export(self, export):

@@ -86,9 +86,6 @@ class RbdTestCase(test.NoDBTestCase):
         self.volume_name = u'volume-00000001'
         self.snap_name = u'test-snap'
 
-    def tearDown(self):
-        super(RbdTestCase, self).tearDown()
-
     @mock.patch.object(rbd_utils, 'rbd')
     def test_rbdproxy_wraps_rbd(self, mock_rbd):
         proxy = rbd_utils.RbdProxy()
@@ -309,6 +306,12 @@ class RbdTestCase(test.NoDBTestCase):
         self.assertRaises(mock_rados.Error, self.driver._connect_to_rados)
         mock_rados.Rados.open_ioctx.assert_called_once_with(self.rbd_pool)
         mock_rados.Rados.shutdown.assert_called_once_with()
+
+    @mock.patch.object(rbd_utils, 'rados')
+    def test_connect_to_rados_unicode_arg(self, mock_rados):
+        self.driver._connect_to_rados(u'unicode_pool')
+        self.mock_rados.Rados.open_ioctx.assert_called_with(
+            test.MatchType(str))
 
     def test_ceph_args_none(self):
         self.driver.rbd_user = None

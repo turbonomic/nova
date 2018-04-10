@@ -15,29 +15,6 @@
 
 from oslo_config import cfg
 
-default_opts = [
-    cfg.StrOpt("scheduler_topic",
-        default="scheduler",
-        deprecated_for_removal=True,
-        deprecated_since="15.0.0",
-        deprecated_reason="""
-There is no need to let users choose the RPC topic for all services - there
-is little gain from this. Furthermore, it makes it really easy to break Nova
-by using this option.
-""",
-        help="""
-Scheduler message queue topic.
-
-This is the message queue topic that the scheduler 'listens' on. It is used
-when the scheduler service is started up to configure the queue, and whenever
-an RPC call to the scheduler is made. There is almost never any reason to ever
-change this value.
-
-Possible values:
-
-* A valid AMQP topic name
-"""),
-]
 
 scheduler_group = cfg.OptGroup(name="scheduler",
                                title="Scheduler configuration")
@@ -57,27 +34,32 @@ uses. The options values are chosen from the entry points under the namespace
 """),
     cfg.StrOpt("driver",
         default="filter_scheduler",
-        choices=("filter_scheduler", "caching_scheduler",
-                 "chance_scheduler", "fake_scheduler"),
         deprecated_name="scheduler_driver",
         deprecated_group="DEFAULT",
         help="""
-The class of the driver used by the scheduler.
+The class of the driver used by the scheduler. This should be chosen from one
+of the entrypoints under the namespace 'nova.scheduler.driver' of file
+'setup.cfg'. If nothing is specified in this option, the 'filter_scheduler' is
+used.
 
-The options are chosen from the entry points under the namespace
-'nova.scheduler.driver' in 'setup.cfg'.
+Other options are:
+
+* 'caching_scheduler' which aggressively caches the system state for better
+  individual scheduler performance at the risk of more retries when running
+  multiple schedulers. [DEPRECATED]
+* 'chance_scheduler' which simply picks a host at random. [DEPRECATED]
+* 'fake_scheduler' which is used for testing.
 
 Possible values:
 
-* A string, where the string corresponds to the class name of a scheduler
-  driver. There are a number of options available:
-** 'caching_scheduler', which aggressively caches the system state for better
-   individual scheduler performance at the risk of more retries when running
-   multiple schedulers
-** 'chance_scheduler', which simply picks a host at random
-** 'fake_scheduler', which is used for testing
-** A custom scheduler driver. In this case, you will be responsible for
-   creating and maintaining the entry point in your 'setup.cfg' file
+* Any of the drivers included in Nova:
+** filter_scheduler
+** caching_scheduler
+** chance_scheduler
+** fake_scheduler
+* You may also set this to the entry point name of a custom scheduler driver,
+  but you will be responsible for creating and maintaining it in your setup.cfg
+  file.
 """),
     cfg.IntOpt("periodic_task_interval",
         default=60,
@@ -135,12 +117,11 @@ This value controls how often (in seconds) the scheduler should attempt
 to discover new hosts that have been added to cells. If negative (the
 default), no automatic discovery will occur.
 
-Small deployments may want this periodic task enabled, as surveying the
-cells for new hosts is likely to be lightweight enough to not cause undue
-burdon to the scheduler. However, larger clouds (and those that are not
-adding hosts regularly) will likely want to disable this automatic
-behavior and instead use the `nova-manage cell_v2 discover_hosts` command
-when hosts have been added to a cell.
+Deployments where compute nodes come and go frequently may want this
+enabled, where others may prefer to manually discover hosts when one
+is added to avoid any overhead from constantly checking. If enabled,
+every time this runs, we will select any unmapped hosts out of each
+cell database on every run.
 """),
 ]
 
@@ -232,6 +213,11 @@ usage data to query the database on each request instead.
 
 This option is only used by the FilterScheduler and its subclasses; if you use
 a different scheduler, this option has no effect.
+
+NOTE: In a multi-cell (v2) setup where the cell MQ is separated from the
+top-level, computes cannot directly communicate with the scheduler. Thus,
+this option cannot be enabled in that scenario. See also the
+[workarounds]/disable_group_policy_check_upcall option.
 """),
     cfg.MultiStrOpt("available_filters",
         default=["nova.scheduler.filters.all_filters"],
@@ -262,8 +248,6 @@ Related options:
         default=[
           "RetryFilter",
           "AvailabilityZoneFilter",
-          "RamFilter",
-          "DiskFilter",
           "ComputeFilter",
           "ComputeCapabilitiesFilter",
           "ImagePropertiesFilter",
@@ -276,8 +260,7 @@ Related options:
 Filters that the scheduler will use.
 
 An ordered list of filter class names that will be used for filtering
-hosts. Ignore the word 'default' in the name of this option: these filters will
-*always* be applied, and they will be applied in the order they are listed so
+hosts. These filters will be applied in the order they are listed so
 place your most restrictive filters first to make the filtering process more
 efficient.
 
@@ -308,6 +291,13 @@ Related options:
         ],
         deprecated_name="baremetal_scheduler_default_filters",
         deprecated_group="DEFAULT",
+        deprecated_for_removal=True,
+        deprecated_reason="""
+These filters were used to overcome some of the baremetal scheduling
+limitations in Nova prior to the use of the Placement API. Now scheduling will
+use the custom resource class defined for each baremetal node to make its
+selection.
+""",
         help="""
 Filters used for filtering baremetal hosts.
 
@@ -330,6 +320,13 @@ Related options:
     cfg.BoolOpt("use_baremetal_filters",
         deprecated_name="scheduler_use_baremetal_filters",
         deprecated_group="DEFAULT",
+        deprecated_for_removal=True,
+        deprecated_reason="""
+These filters were used to overcome some of the baremetal scheduling
+limitations in Nova prior to the use of the Placement API. Now scheduling will
+use the custom resource class defined for each baremetal node to make its
+selection.
+""",
         default=False,
         help="""
 Enable baremetal filters.
@@ -436,6 +433,25 @@ Possible values:
 * An integer or float value, where the value corresponds to the multipler
   ratio for this weigher.
 """),
+    cfg.FloatOpt("pci_weight_multiplier",
+        default=1.0,
+        min=0.0,
+        help="""
+PCI device affinity weight multiplier.
+
+The PCI device affinity weighter computes a weighting based on the number of
+PCI devices on the host and the number of PCI devices requested by the
+instance. The ``NUMATopologyFilter`` filter must be enabled for this to have
+any significance. For more information, refer to the filter documentation:
+
+    https://docs.openstack.org/developer/nova/filter_scheduler.html
+
+Possible values:
+
+* A positive integer or float value, where the value corresponds to the
+  multiplier ratio for this weigher.
+"""),
+    # TODO(sfinucan): Add 'min' parameter and remove warning in 'affinity.py'
     cfg.FloatOpt("soft_affinity_weight_multiplier",
         default=1.0,
         deprecated_group="DEFAULT",
@@ -586,8 +602,11 @@ Configuration options for enabling Trusted Platform Module.
 """)
 
 trusted_opts = [
-    cfg.StrOpt("attestation_server",
-            help="""
+    cfg.HostAddressOpt("attestation_server",
+                       deprecated_for_removal=True,
+                       deprecated_reason="Incomplete filter",
+                       deprecated_since="Pike",
+                       help="""
 The host to use as the attestation server.
 
 Cloud computing pools can involve thousands of compute nodes located at
@@ -615,6 +634,9 @@ Related options:
 * attestation_insecure_ssl
 """),
     cfg.StrOpt("attestation_server_ca_file",
+            deprecated_for_removal=True,
+            deprecated_reason="Incomplete filter",
+            deprecated_since="Pike",
             help="""
 The absolute path to the certificate to use for authentication when connecting
 to the attestation server. See the `attestation_server` help text for more
@@ -640,6 +662,9 @@ Related options:
 """),
     cfg.PortOpt("attestation_port",
             default=8443,
+            deprecated_for_removal=True,
+            deprecated_reason="Incomplete filter",
+            deprecated_since="Pike",
             help="""
 The port to use when connecting to the attestation server. See the
 `attestation_server` help text for more information about host verification.
@@ -659,6 +684,9 @@ Related options:
 """),
     cfg.StrOpt("attestation_api_url",
             default="/OpenAttestationWebServices/V1.0",
+            deprecated_for_removal=True,
+            deprecated_reason="Incomplete filter",
+            deprecated_since="Pike",
             help="""
 The URL on the attestation server to use. See the `attestation_server` help
 text for more information about host verification.
@@ -685,6 +713,9 @@ Related options:
 """),
     cfg.StrOpt("attestation_auth_blob",
             secret=True,
+            deprecated_for_removal=True,
+            deprecated_reason="Incomplete filter",
+            deprecated_since="Pike",
             help="""
 Attestation servers require a specific blob that is used to authenticate. The
 content and format of the blob are determined by the particular attestation
@@ -712,6 +743,9 @@ Related options:
 """),
     cfg.IntOpt("attestation_auth_timeout",
             default=60,
+            deprecated_for_removal=True,
+            deprecated_reason="Incomplete filter",
+            deprecated_since="Pike",
             min=0,
             help="""
 This value controls how long a successful attestation is cached. Once this
@@ -739,6 +773,9 @@ Related options:
 """),
     cfg.BoolOpt("attestation_insecure_ssl",
             default=False,
+            deprecated_for_removal=True,
+            deprecated_reason="Incomplete filter",
+            deprecated_since="Pike",
             help="""
 When set to True, the SSL certificate verification is skipped for the
 attestation service. See the `attestation_server` help text for more
@@ -880,8 +917,6 @@ Related options:
 
 
 def register_opts(conf):
-    conf.register_opts(default_opts)
-
     conf.register_group(scheduler_group)
     conf.register_opts(scheduler_opts, group=scheduler_group)
 

@@ -22,15 +22,26 @@ POLICY_ROOT = 'os_compute_api:ips:%s'
 
 
 ips_policies = [
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'discoverable',
-        check_str=base.RULE_ANY),
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'show',
-        check_str=base.RULE_ADMIN_OR_OWNER),
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'index',
-        check_str=base.RULE_ADMIN_OR_OWNER),
+    policy.DocumentedRuleDefault(
+        POLICY_ROOT % 'show',
+        base.RULE_ADMIN_OR_OWNER,
+        "Show IP addresses details for a network label of a server",
+        [
+            {
+                'method': 'GET',
+                'path': '/servers/{server_id}/ips/{network_label}'
+            }
+        ]),
+    policy.DocumentedRuleDefault(
+        POLICY_ROOT % 'index',
+        base.RULE_ADMIN_OR_OWNER,
+        "List IP addresses that are assigned to a server",
+        [
+            {
+                'method': 'GET',
+                'path': '/servers/{server_id}/ips'
+            }
+        ]),
 ]
 
 

@@ -13,9 +13,11 @@
 #    under the License.
 
 from oslo_log import log as logging
+from oslo_utils import uuidutils
 from oslo_utils import versionutils
 
 from nova import availability_zones
+from nova import context as nova_context
 from nova import db
 from nova import exception
 from nova.i18n import _LW
@@ -30,7 +32,7 @@ LOG = logging.getLogger(__name__)
 
 
 # NOTE(danms): This is the global service version counter
-SERVICE_VERSION = 17
+SERVICE_VERSION = 22
 
 
 # NOTE(danms): This is our SERVICE_VERSION history. The idea is that any
@@ -100,6 +102,17 @@ SERVICE_VERSION_HISTORY = (
     # the old check in the API as the old computes fail if the volume is moved
     # to 'attaching' state by reserve.
     {'compute_rpc': '4.13'},
+    # Version 18: Compute RPC version 4.14
+    {'compute_rpc': '4.14'},
+    # Version 19: Compute RPC version 4.15
+    {'compute_rpc': '4.15'},
+    # Version 20: Compute RPC version 4.16
+    {'compute_rpc': '4.16'},
+    # Version 21: Compute RPC version 4.17
+    {'compute_rpc': '4.17'},
+    # Version 22: A marker for the behaviour change of auto-healing code on the
+    # compute host regarding allocations against an instance
+    {'compute_rpc': '4.17'},
 )
 
 
@@ -128,10 +141,13 @@ class Service(base.NovaPersistentObject, base.NovaObject,
     # Version 1.18: ComputeNode version 1.14
     # Version 1.19: Added get_minimum_version()
     # Version 1.20: Added get_minimum_version_multi()
-    VERSION = '1.20'
+    # Version 1.21: Added uuid
+    # Version 1.22: Added get_by_uuid()
+    VERSION = '1.22'
 
     fields = {
         'id': fields.IntegerField(read_only=True),
+        'uuid': fields.UUIDField(),
         'host': fields.StringField(nullable=True),
         'binary': fields.StringField(nullable=True),
         'topic': fields.StringField(nullable=True),
@@ -171,6 +187,8 @@ class Service(base.NovaPersistentObject, base.NovaObject,
         super(Service, self).obj_make_compatible_from_manifest(
             primitive, target_version, version_manifest)
         _target_version = versionutils.convert_version_to_tuple(target_version)
+        if _target_version < (1, 21) and 'uuid' in primitive:
+            del primitive['uuid']
         if _target_version < (1, 16) and 'version' in primitive:
             del primitive['version']
         if _target_version < (1, 14) and 'forced_down' in primitive:
@@ -210,10 +228,23 @@ class Service(base.NovaPersistentObject, base.NovaObject,
                 # NOTE(danms): Special handling of the version field, since
                 # it is read_only and set in our init.
                 setattr(service, base.get_attrname(key), db_service[key])
+            elif key == 'uuid' and not db_service.get(key):
+                # Leave uuid off the object if undefined in the database
+                # so that it will be generated below.
+                continue
             else:
                 service[key] = db_service[key]
+
         service._context = context
         service.obj_reset_changes()
+
+        # TODO(dpeschman): Drop this once all services have uuids in database
+        if 'uuid' not in service:
+            service.uuid = uuidutils.generate_uuid()
+            LOG.debug('Generated UUID %(uuid)s for service %(id)i',
+                      dict(uuid=service.uuid, id=service.id))
+            service.save()
+
         return service
 
     def obj_load_attr(self, attrname):
@@ -246,6 +277,11 @@ class Service(base.NovaPersistentObject, base.NovaObject,
     @base.remotable_classmethod
     def get_by_id(cls, context, service_id):
         db_service = db.service_get(context, service_id)
+        return cls._from_db_object(context, cls(), db_service)
+
+    @base.remotable_classmethod
+    def get_by_uuid(cls, context, service_uuid):
+        db_service = db.service_get_by_uuid(context, service_uuid)
         return cls._from_db_object(context, cls(), db_service)
 
     @base.remotable_classmethod
@@ -311,6 +347,11 @@ class Service(base.NovaPersistentObject, base.NovaObject,
                                               reason='already created')
         self._check_minimum_version()
         updates = self.obj_get_changes()
+
+        if 'uuid' not in updates:
+            updates['uuid'] = uuidutils.generate_uuid()
+            self.uuid = updates['uuid']
+
         db_service = db.service_create(self._context, updates)
         self._from_db_object(self._context, self, db_service)
 
@@ -394,6 +435,19 @@ class Service(base.NovaPersistentObject, base.NovaObject,
     def get_minimum_version(cls, context, binary, use_slave=False):
         return cls.get_minimum_version_multi(context, [binary],
                                              use_slave=use_slave)
+
+
+def get_minimum_version_all_cells(context, binaries):
+    """Get the minimum service version, checking all cells"""
+
+    cells = objects.CellMappingList.get_all(context)
+    min_version = None
+    for cell in cells:
+        with nova_context.target_cell(context, cell) as cctxt:
+            version = objects.Service.get_minimum_version_multi(
+                cctxt, binaries)
+        min_version = min(min_version, version) if min_version else version
+    return min_version
 
 
 @base.NovaObjectRegistry.register

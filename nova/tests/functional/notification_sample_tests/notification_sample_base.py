@@ -21,9 +21,9 @@ from oslo_utils import fixture as utils_fixture
 
 from nova import test
 from nova.tests import fixtures as nova_fixtures
-from nova.tests.functional.api import client as api_client
 from nova.tests.functional import integrated_helpers
 from nova.tests.unit.api.openstack.compute import test_services
+from nova.tests.unit import fake_crypto
 from nova.tests.unit import fake_notifier
 import nova.tests.unit.image.fake
 
@@ -53,6 +53,13 @@ class NotificationSampleTestBase(test.TestCase,
 
     REQUIRES_LOCKING = True
 
+    # NOTE(gibi): Notification payloads always reflect the data needed
+    # for every supported API microversion so we can safe to use the latest
+    # API version in the tests. This helps the test to use the new API
+    # features too. This can be overridden by subclasses that need to cap
+    # at a specific microversion for older APIs.
+    MAX_MICROVERSION = 'latest'
+
     def setUp(self):
         super(NotificationSampleTestBase, self).setUp()
 
@@ -61,6 +68,11 @@ class NotificationSampleTestBase(test.TestCase,
 
         self.api = api_fixture.api
         self.admin_api = api_fixture.admin_api
+
+        max_version = self.MAX_MICROVERSION
+        self.api.microversion = max_version
+        self.admin_api.microversion = max_version
+
         fake_notifier.stub_notifier(self)
         self.addCleanup(fake_notifier.reset)
 
@@ -70,6 +82,7 @@ class NotificationSampleTestBase(test.TestCase,
         # the image fake backend needed for image discovery
         nova.tests.unit.image.fake.stub_out_image_service(self)
         self.addCleanup(nova.tests.unit.image.fake.FakeImageService_reset)
+        self.useFixture(nova_fixtures.PlacementFixture())
 
         self.start_service('conductor')
         self.start_service('scheduler')
@@ -151,13 +164,25 @@ class NotificationSampleTestBase(test.TestCase,
         # Ignore the create flavor notification
         fake_notifier.reset()
 
+        keypair_req = {
+            "keypair": {
+                "name": "my-key",
+                "public_key": fake_crypto.get_ssh_public_key()
+            }}
+        self.api.post_keypair(keypair_req)
+
         server = self._build_minimal_create_server_request(
             self.api, 'some-server',
             image_uuid='155d900f-4e14-4e4c-a73d-069cbf4541e6',
             flavor_id=flavor_id)
 
+        # NOTE(gibi): from microversion 2.19 the description is not set to the
+        # instance name automatically but can be provided at boot.
+        server['description'] = 'some-server'
+
         if extra_params:
             extra_params['return_reservation_id'] = True
+            extra_params['key_name'] = 'my-key'
             server.update(extra_params)
 
         post = {'server': server}
@@ -173,20 +198,10 @@ class NotificationSampleTestBase(test.TestCase,
         found_server = self._wait_for_state_change(self.api, created_server,
                                                    expected_status)
         found_server['reservation_id'] = reservation_id
+
+        if found_server['status'] == 'ACTIVE':
+            self.api.put_server_tags(found_server['id'], ['tag1'])
         return found_server
-
-    def _wait_until_deleted(self, server):
-        try:
-            for i in range(40):
-                server = self.api.get_server(server['id'])
-                if server['status'] == 'ERROR':
-                    self.fail('Server went to error state instead of'
-                              'disappearing.')
-                time.sleep(0.5)
-
-            self.fail('Server failed to delete.')
-        except api_client.OpenStackApiNotFoundException:
-            return
 
     def _get_notifications(self, event_type):
         return [notification for notification
@@ -221,3 +236,28 @@ class NotificationSampleTestBase(test.TestCase,
                          (event_type, expected_count, len(notifications),
                           notifications))
         return notifications
+
+    def _attach_volume_to_server(self, server, volume_id):
+        self.api.post_server_volume(
+            server['id'], {"volumeAttachment": {"volumeId": volume_id}})
+        self._wait_for_notification('instance.volume_attach.end')
+
+    def _wait_and_get_migrations(self, server, max_retries=20):
+        """Simple method to wait for the migrations
+
+        Here we wait for the moment where active migration is in progress so
+        we can get them and use them in the migration-related tests.
+
+        :param server: server we'd like to use
+        :param max_retries: maximum number of retries
+        :returns: the migrations
+        """
+        retries = 0
+        while retries < max_retries:
+            retries += 1
+            migrations = self.admin_api.get_active_migrations(server['id'])
+            if (len(migrations) > 0 and
+                        migrations[0]['status'] != 'preparing'):
+                return migrations
+            if retries == max_retries:
+                self.fail('The migration table left empty.')

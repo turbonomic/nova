@@ -25,8 +25,10 @@ from nova import objects
 from nova.objects import aggregate
 from nova.objects import service
 from nova import test
+from nova.tests import fixtures
 from nova.tests.unit.objects import test_compute_node
 from nova.tests.unit.objects import test_objects
+from nova.tests import uuidsentinel
 
 NOW = timeutils.utcnow().replace(microsecond=0)
 
@@ -38,6 +40,7 @@ def _fake_service(**kwargs):
         'deleted_at': None,
         'deleted': False,
         'id': 123,
+        'uuid': uuidsentinel.service,
         'host': 'fake-host',
         'binary': 'nova-fake',
         'topic': 'fake-service-topic',
@@ -97,6 +100,10 @@ class _TestServiceObject(object):
     def test_get_by_id(self):
         self._test_query('service_get', 'get_by_id', 123)
 
+    def test_get_by_uuid(self):
+        self._test_query('service_get_by_uuid', 'get_by_uuid',
+                         uuidsentinel.service_uuid)
+
     def test_get_by_host_and_topic(self):
         self._test_query('service_get_by_host_and_topic',
                          'get_by_host_and_topic', 'fake-host', 'fake-topic')
@@ -123,12 +130,24 @@ class _TestServiceObject(object):
     def test_create(self, mock_service_create):
         service_obj = service.Service(context=self.context)
         service_obj.host = 'fake-host'
+        service_obj.uuid = uuidsentinel.service2
         service_obj.create()
         self.assertEqual(fake_service['id'], service_obj.id)
         self.assertEqual(service.SERVICE_VERSION, service_obj.version)
         mock_service_create.assert_called_once_with(
                        self.context, {'host': 'fake-host',
+                                      'uuid': uuidsentinel.service2,
                                       'version': fake_service['version']})
+
+    @mock.patch('nova.objects.service.uuidutils.generate_uuid',
+                return_value=uuidsentinel.service3)
+    @mock.patch.object(db, 'service_create', return_value=fake_service)
+    def test_create_without_uuid_generates_one(
+            self, mock_service_create, generate_uuid):
+        service_obj = service.Service(context=self.context)
+        service_obj.create()
+        create_args = mock_service_create.call_args[0][1]
+        self.assertEqual(generate_uuid.return_value, create_args['uuid'])
 
     @mock.patch.object(db, 'service_create', return_value=fake_service)
     def test_recreate_fails(self, mock_service_create):
@@ -392,6 +411,28 @@ class _TestServiceObject(object):
                                               binary='nova-compute',
                                               ).create)
 
+    @mock.patch('nova.objects.base.NovaObject'
+                '.obj_make_compatible_from_manifest', new=mock.Mock())
+    def test_obj_make_compatible_from_manifest_strips_uuid(self):
+        s = service.Service()
+        primitive = {'uuid': uuidsentinel.service}
+        s.obj_make_compatible_from_manifest(primitive, '1.20', mock.Mock())
+        self.assertNotIn('uuid', primitive)
+
+    @mock.patch('nova.objects.service.uuidutils.generate_uuid',
+                return_value=uuidsentinel.service4)
+    def test_from_db_object_without_uuid_generates_one(self, generate_uuid):
+        values = _fake_service(uuid=None, id=None)
+        db_service = db.api.service_create(self.context, values)
+
+        s = service.Service()
+        service.Service._from_db_object(self.context, s, db_service)
+        self.assertEqual(uuidsentinel.service4, s.uuid)
+
+        # Check the DB too
+        db_service2 = db.api.service_get(self.context, s.id)
+        self.assertEqual(s.uuid, db_service2['uuid'])
+
 
 class TestServiceObject(test_objects._LocalTest,
                         _TestServiceObject):
@@ -444,3 +485,48 @@ class TestServiceVersion(test.TestCase):
         obj = objects.Service()
         obj._from_db_object(self.ctxt, obj, fake_different_service)
         self.assertEqual(fake_version, obj.version)
+
+
+class TestServiceVersionCells(test.TestCase):
+
+    def setUp(self):
+        self.context = context.get_admin_context()
+        super(TestServiceVersionCells, self).setUp()
+
+    def _setup_cells(self):
+        # NOTE(danms): Override the base class's cell setup so we can have two
+        self.cells = fixtures.CellDatabases()
+        self.cells.add_cell_database(uuidsentinel.cell1, default=True)
+        self.cells.add_cell_database(uuidsentinel.cell2)
+        self.useFixture(self.cells)
+
+        cm = objects.CellMapping(context=self.context,
+                                 uuid=uuidsentinel.cell1,
+                                 name='cell1',
+                                 transport_url='fake://nowhere/',
+                                 database_connection=uuidsentinel.cell1)
+        cm.create()
+        cm = objects.CellMapping(context=self.context,
+                                 uuid=uuidsentinel.cell2,
+                                 name='cell2',
+                                 transport_url='fake://nowhere/',
+                                 database_connection=uuidsentinel.cell2)
+        cm.create()
+
+    def _create_services(self, *versions):
+        cells = objects.CellMappingList.get_all(self.context)
+        index = 0
+        for version in versions:
+            service = objects.Service(context=self.context,
+                                      binary='nova-compute')
+            service.version = version
+            cell = cells[index % len(cells)]
+            with context.target_cell(self.context, cell):
+                service.create()
+            index += 1
+
+    @mock.patch('nova.objects.Service._check_minimum_version')
+    def test_version_all_cells(self, mock_check):
+        self._create_services(16, 16, 13, 16)
+        self.assertEqual(13, service.get_minimum_version_all_cells(
+            self.context, ['nova-compute']))

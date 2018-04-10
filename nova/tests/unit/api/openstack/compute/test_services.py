@@ -19,11 +19,11 @@ import datetime
 import iso8601
 import mock
 from oslo_utils import fixture as utils_fixture
+import six
 import webob.exc
 
 from nova.api.openstack import api_version_request as api_version
 from nova.api.openstack.compute import services as services_v21
-from nova.api.openstack import extensions
 from nova.api.openstack import wsgi as os_wsgi
 from nova import availability_zones
 from nova.cells import utils as cells_utils
@@ -33,8 +33,13 @@ from nova import exception
 from nova import objects
 from nova.servicegroup.drivers import db as db_driver
 from nova import test
+from nova.tests import fixtures
 from nova.tests.unit.api.openstack import fakes
 from nova.tests.unit.objects import test_service
+from nova.tests import uuidsentinel
+
+# This is tied into the os-services API samples functional tests.
+FAKE_UUID_COMPUTE_HOST1 = 'e81d66a4-ddd3-4aba-8a84-171d1cb4d339'
 
 
 fake_services_list = [
@@ -42,6 +47,7 @@ fake_services_list = [
          binary='nova-scheduler',
          host='host1',
          id=1,
+         uuid=uuidsentinel.svc1,
          disabled=True,
          topic='scheduler',
          updated_at=datetime.datetime(2012, 10, 29, 13, 42, 2),
@@ -53,6 +59,7 @@ fake_services_list = [
          binary='nova-compute',
          host='host1',
          id=2,
+         uuid=FAKE_UUID_COMPUTE_HOST1,
          disabled=True,
          topic='compute',
          updated_at=datetime.datetime(2012, 10, 29, 13, 42, 5),
@@ -64,6 +71,7 @@ fake_services_list = [
          binary='nova-scheduler',
          host='host2',
          id=3,
+         uuid=uuidsentinel.svc3,
          disabled=False,
          topic='scheduler',
          updated_at=datetime.datetime(2012, 9, 19, 6, 55, 34),
@@ -75,6 +83,7 @@ fake_services_list = [
          binary='nova-compute',
          host='host2',
          id=4,
+         uuid=uuidsentinel.svc4,
          disabled=True,
          topic='compute',
          updated_at=datetime.datetime(2012, 9, 18, 8, 3, 38),
@@ -87,6 +96,7 @@ fake_services_list = [
          binary='nova-osapi_compute',
          host='host2',
          id=5,
+         uuid=uuidsentinel.svc5,
          disabled=False,
          topic=None,
          updated_at=None,
@@ -98,6 +108,7 @@ fake_services_list = [
          binary='nova-metadata',
          host='host2',
          id=6,
+         uuid=uuidsentinel.svc6,
          disabled=False,
          topic=None,
          updated_at=None,
@@ -116,6 +127,9 @@ class FakeRequest(object):
         super(FakeRequest, self).__init__()
         self.api_version_request = api_version.APIVersionRequest(version)
 
+    def is_legacy_v2(self):
+        return False
+
 
 class FakeRequestWithService(FakeRequest):
     GET = {"binary": "nova-compute"}
@@ -130,7 +144,8 @@ class FakeRequestWithHostService(FakeRequest):
 
 
 def fake_service_get_all(services):
-    def service_get_all(context, filters=None, set_zones=False):
+    def service_get_all(context, filters=None, set_zones=False,
+                        all_cells=False):
         if set_zones or 'availability_zone' in filters:
             return availability_zones.set_availability_zones(context,
                                                              services)
@@ -194,9 +209,6 @@ class ServicesTestV21(test.TestCase):
     def setUp(self):
         super(ServicesTestV21, self).setUp()
 
-        self.ext_mgr = extensions.ExtensionManager()
-        self.ext_mgr.extensions = {}
-
         self.ctxt = context.get_admin_context()
         self.host_api = compute.HostAPI()
         self._set_up_controller()
@@ -210,6 +222,7 @@ class ServicesTestV21(test.TestCase):
                       fake_db_service_update(fake_services_list))
 
         self.req = fakes.HTTPRequest.blank('')
+        self.useFixture(fixtures.SingleCellSimple())
 
     def _process_output(self, services, has_disabled=False, has_id=False):
         return services
@@ -319,7 +332,6 @@ class ServicesTestV21(test.TestCase):
         self.assertEqual(res_dict, response)
 
     def test_services_detail(self):
-        self.ext_mgr.extensions['os-extended-services'] = True
         req = FakeRequest()
         res_dict = self.controller.index(req)
 
@@ -360,7 +372,6 @@ class ServicesTestV21(test.TestCase):
         self.assertEqual(res_dict, response)
 
     def test_service_detail_with_host(self):
-        self.ext_mgr.extensions['os-extended-services'] = True
         req = FakeRequestWithHost()
         res_dict = self.controller.index(req)
 
@@ -385,7 +396,6 @@ class ServicesTestV21(test.TestCase):
         self.assertEqual(res_dict, response)
 
     def test_service_detail_with_service(self):
-        self.ext_mgr.extensions['os-extended-services'] = True
         req = FakeRequestWithService()
         res_dict = self.controller.index(req)
 
@@ -410,7 +420,6 @@ class ServicesTestV21(test.TestCase):
         self.assertEqual(res_dict, response)
 
     def test_service_detail_with_host_service(self):
-        self.ext_mgr.extensions['os-extended-services'] = True
         req = FakeRequestWithHostService()
         res_dict = self.controller.index(req)
 
@@ -427,7 +436,6 @@ class ServicesTestV21(test.TestCase):
         self.assertEqual(res_dict, response)
 
     def test_services_detail_with_delete_extension(self):
-        self.ext_mgr.extensions['os-extended-services-delete'] = True
         req = FakeRequest()
         res_dict = self.controller.index(req)
 
@@ -487,6 +495,17 @@ class ServicesTestV21(test.TestCase):
                           "enable",
                           body=body)
 
+    def test_services_enable_with_unmapped_host(self):
+        body = {'host': 'invalid', 'binary': 'nova-compute'}
+        with mock.patch.object(self.controller.host_api,
+                               'service_update') as m:
+            m.side_effect = exception.HostMappingNotFound(name='something')
+            self.assertRaises(webob.exc.HTTPNotFound,
+                              self.controller.update,
+                              self.req,
+                              "enable",
+                              body=body)
+
     def test_services_enable_with_invalid_binary(self):
         body = {'host': 'host1', 'binary': 'invalid'}
         self.assertRaises(webob.exc.HTTPNotFound,
@@ -519,7 +538,6 @@ class ServicesTestV21(test.TestCase):
                           body=body)
 
     def test_services_disable_log_reason(self):
-        self.ext_mgr.extensions['os-extended-services'] = True
         body = {'host': 'host1',
                 'binary': 'nova-compute',
                 'disabled_reason': 'test-reason',
@@ -532,7 +550,6 @@ class ServicesTestV21(test.TestCase):
         self.assertEqual(res_dict['service']['disabled_reason'], 'test-reason')
 
     def test_mandatory_reason_field(self):
-        self.ext_mgr.extensions['os-extended-services'] = True
         body = {'host': 'host1',
                 'binary': 'nova-compute',
                }
@@ -541,7 +558,6 @@ class ServicesTestV21(test.TestCase):
                 body=body)
 
     def test_invalid_reason_field(self):
-        self.ext_mgr.extensions['os-extended-services'] = True
         reason = 'a' * 256
         body = {'host': 'host1',
                 'binary': 'nova-compute',
@@ -552,7 +568,6 @@ class ServicesTestV21(test.TestCase):
                 body=body)
 
     def test_services_delete(self):
-        self.ext_mgr.extensions['os-extended-services-delete'] = True
 
         compute = self.host_api.db.service_create(self.ctxt,
             {'host': 'fake-compute-host',
@@ -568,16 +583,21 @@ class ServicesTestV21(test.TestCase):
             self.assertEqual(self.controller.delete.wsgi_code, 204)
 
     def test_services_delete_not_found(self):
-        self.ext_mgr.extensions['os-extended-services-delete'] = True
 
         self.assertRaises(webob.exc.HTTPNotFound,
                           self.controller.delete, self.req, 1234)
 
-    def test_services_delete_bad_request(self):
-        self.ext_mgr.extensions['os-extended-services-delete'] = True
+    def test_services_delete_invalid_id(self):
 
         self.assertRaises(webob.exc.HTTPBadRequest,
                           self.controller.delete, self.req, 'abc')
+
+    def test_services_delete_duplicate_service(self):
+        with mock.patch.object(self.controller, 'host_api') as host_api:
+            host_api.service_delete.side_effect = exception.ServiceNotUnique()
+            self.assertRaises(webob.exc.HTTPBadRequest,
+                              self.controller.delete, self.req, 1234)
+            self.assertTrue(host_api.service_delete.called)
 
     # This test is just to verify that the servicegroup API gets used when
     # calling the API
@@ -704,7 +724,6 @@ class ServicesTestV211(ServicesTestV21):
         self.assertEqual(res_dict, response)
 
     def test_services_detail(self):
-        self.ext_mgr.extensions['os-extended-services'] = True
         req = FakeRequest(self.wsgi_api_version)
         res_dict = self.controller.index(req)
 
@@ -749,7 +768,6 @@ class ServicesTestV211(ServicesTestV21):
         self.assertEqual(res_dict, response)
 
     def test_service_detail_with_host(self):
-        self.ext_mgr.extensions['os-extended-services'] = True
         req = FakeRequestWithHost(self.wsgi_api_version)
         res_dict = self.controller.index(req)
 
@@ -776,7 +794,6 @@ class ServicesTestV211(ServicesTestV21):
         self.assertEqual(res_dict, response)
 
     def test_service_detail_with_service(self):
-        self.ext_mgr.extensions['os-extended-services'] = True
         req = FakeRequestWithService(self.wsgi_api_version)
         res_dict = self.controller.index(req)
 
@@ -803,7 +820,6 @@ class ServicesTestV211(ServicesTestV21):
         self.assertEqual(res_dict, response)
 
     def test_service_detail_with_host_service(self):
-        self.ext_mgr.extensions['os-extended-services'] = True
         req = FakeRequestWithHostService(self.wsgi_api_version)
         res_dict = self.controller.index(req)
 
@@ -821,7 +837,6 @@ class ServicesTestV211(ServicesTestV21):
         self.assertEqual(res_dict, response)
 
     def test_services_detail_with_delete_extension(self):
-        self.ext_mgr.extensions['os-extended-services-delete'] = True
         req = FakeRequest(self.wsgi_api_version)
         res_dict = self.controller.index(req)
 
@@ -865,6 +880,272 @@ class ServicesTestV211(ServicesTestV21):
         self._process_output(response, has_id=True)
         self.assertEqual(res_dict, response)
 
+    def test_force_down_service(self):
+        req = FakeRequest(self.wsgi_api_version)
+        req_body = {"forced_down": True,
+                    "host": "host1", "binary": "nova-compute"}
+        res_dict = self.controller.update(req, 'force-down', body=req_body)
+
+        response = {
+            "service": {
+                "forced_down": True,
+                "host": "host1",
+                "binary": "nova-compute"
+            }
+        }
+        self.assertEqual(response, res_dict)
+
+    def test_force_down_service_with_string_forced_down(self):
+        req = FakeRequest(self.wsgi_api_version)
+        req_body = {"forced_down": "True",
+                    "host": "host1", "binary": "nova-compute"}
+        res_dict = self.controller.update(req, 'force-down', body=req_body)
+
+        response = {
+            "service": {
+                "forced_down": True,
+                "host": "host1",
+                "binary": "nova-compute"
+            }
+        }
+        self.assertEqual(response, res_dict)
+
+    def test_force_down_service_with_invalid_parameter(self):
+        req = FakeRequest(self.wsgi_api_version)
+        req_body = {"forced_down": "Invalid",
+                    "host": "host1", "binary": "nova-compute"}
+        self.assertRaises(exception.ValidationError,
+            self.controller.update, req, 'force-down', body=req_body)
+
+
+class ServicesTestV252(ServicesTestV211):
+    """This is a boundary test to ensure that 2.52 behaves the same as 2.11."""
+    wsgi_api_version = '2.52'
+
+
+class FakeServiceGroupAPI(object):
+    def service_is_up(self, *args, **kwargs):
+        return True
+
+    def get_updated_time(self, *args, **kwargs):
+        return mock.sentinel.updated_time
+
+
+class ServicesTestV253(test.TestCase):
+    """Tests for the 2.53 microversion in the os-services API."""
+
+    def setUp(self):
+        super(ServicesTestV253, self).setUp()
+        self.controller = services_v21.ServiceController()
+        self.controller.servicegroup_api = FakeServiceGroupAPI()
+        self.req = fakes.HTTPRequest.blank(
+            '', version=services_v21.UUID_FOR_ID_MIN_VERSION)
+
+    def assert_services_equal(self, s1, s2):
+        for k in ('binary', 'host'):
+            self.assertEqual(s1[k], s2[k])
+
+    def test_list_has_uuid_in_id_field(self):
+        """Tests that a GET response includes an id field but the value is
+        the service uuid rather than the id integer primary key.
+        """
+        service_uuids = [s['uuid'] for s in fake_services_list]
+        with mock.patch.object(
+                self.controller.host_api, 'service_get_all',
+                side_effect=fake_service_get_all(fake_services_list)):
+            resp = self.controller.index(self.req)
+
+        for service in resp['services']:
+            # Make sure a uuid field wasn't returned.
+            self.assertNotIn('uuid', service)
+            # Make sure the id field is one of our known uuids.
+            self.assertIn(service['id'], service_uuids)
+            # Make sure this service was in our known list of fake services.
+            expected = next(iter(filter(
+                lambda s: s['uuid'] == service['id'],
+                fake_services_list)))
+            self.assert_services_equal(expected, service)
+
+    def test_delete_takes_uuid_for_id(self):
+        """Tests that a DELETE request correctly deletes a service when a valid
+        service uuid is provided for an existing service.
+        """
+        service = self.start_service(
+            'compute', 'fake-compute-host').service_ref
+        with mock.patch.object(self.controller.host_api,
+                               'service_delete') as service_delete:
+            self.controller.delete(self.req, service.uuid)
+            service_delete.assert_called_once_with(
+                self.req.environ['nova.context'], service.uuid)
+            self.assertEqual(204, self.controller.delete.wsgi_code)
+
+    def test_delete_uuid_not_found(self):
+        """Tests that we get a 404 response when attempting to delete a service
+        that is not found by the given uuid.
+        """
+        self.assertRaises(webob.exc.HTTPNotFound,
+                          self.controller.delete, self.req, uuidsentinel.svc2)
+
+    def test_delete_invalid_uuid(self):
+        """Tests that the service uuid is validated in a DELETE request."""
+        ex = self.assertRaises(webob.exc.HTTPBadRequest,
+                               self.controller.delete, self.req, 1234)
+        self.assertIn('Invalid uuid', six.text_type(ex))
+
+    def test_update_invalid_service_uuid(self):
+        """Tests that the service uuid is validated in a PUT request."""
+        ex = self.assertRaises(webob.exc.HTTPBadRequest,
+                               self.controller.update, self.req, 1234, body={})
+        self.assertIn('Invalid uuid', six.text_type(ex))
+
+    def test_update_policy_failed(self):
+        """Tests that policy is checked with microversion 2.53."""
+        rule_name = "os_compute_api:os-services"
+        self.policy.set_rules({rule_name: "project_id:non_fake"})
+        exc = self.assertRaises(
+            exception.PolicyNotAuthorized,
+            self.controller.update, self.req, uuidsentinel.service_uuid,
+            body={})
+        self.assertEqual(
+            "Policy doesn't allow %s to be performed." % rule_name,
+            exc.format_message())
+
+    def test_update_service_not_found(self):
+        """Tests that we get a 404 response if the service is not found by
+        the given uuid when handling a PUT request.
+        """
+        self.assertRaises(webob.exc.HTTPNotFound, self.controller.update,
+                          self.req, uuidsentinel.service_uuid, body={})
+
+    def test_update_invalid_status(self):
+        """Tests that jsonschema validates the status field in the request body
+        and fails if it's not "enabled" or "disabled".
+        """
+        service = self.start_service(
+            'compute', 'fake-compute-host').service_ref
+        self.assertRaises(
+            exception.ValidationError, self.controller.update, self.req,
+            service.uuid, body={'status': 'invalid'})
+
+    def test_update_disabled_no_reason_then_enable(self):
+        """Tests disabling a service with no reason given. Then enables it
+        to see the change in the response body.
+        """
+        service = self.start_service(
+            'compute', 'fake-compute-host').service_ref
+        resp = self.controller.update(self.req, service.uuid,
+                                      body={'status': 'disabled'})
+        expected_resp = {
+            'service': {
+                'status': 'disabled',
+                'state': 'up',
+                'binary': 'nova-compute',
+                'host': 'fake-compute-host',
+                'zone': 'nova',  # Comes from CONF.default_availability_zone
+                'updated_at': mock.sentinel.updated_time,
+                'disabled_reason': None,
+                'id': service.uuid,
+                'forced_down': False
+            }
+        }
+        self.assertDictEqual(expected_resp, resp)
+
+        # Now enable the service to see the response change.
+        req = fakes.HTTPRequest.blank(
+            '', version=services_v21.UUID_FOR_ID_MIN_VERSION)
+        resp = self.controller.update(req, service.uuid,
+                                      body={'status': 'enabled'})
+        expected_resp['service']['status'] = 'enabled'
+        self.assertDictEqual(expected_resp, resp)
+
+    def test_update_enable_with_disabled_reason_fails(self):
+        """Validates that requesting to both enable a service and set the
+        disabled_reason results in a 400 BadRequest error.
+        """
+        service = self.start_service(
+            'compute', 'fake-compute-host').service_ref
+        ex = self.assertRaises(webob.exc.HTTPBadRequest,
+                               self.controller.update, self.req, service.uuid,
+                               body={'status': 'enabled',
+                                     'disabled_reason': 'invalid'})
+        self.assertIn("Specifying 'disabled_reason' with status 'enabled' "
+                      "is invalid.", six.text_type(ex))
+
+    def test_update_disabled_reason_and_forced_down(self):
+        """Tests disabling a service with a reason and forcing it down is
+        reflected back in the response.
+        """
+        service = self.start_service(
+            'compute', 'fake-compute-host').service_ref
+        resp = self.controller.update(self.req, service.uuid,
+                                      body={'status': 'disabled',
+                                            'disabled_reason': 'maintenance',
+                                            # Also tests bool_from_string usage
+                                            'forced_down': 'yes'})
+        expected_resp = {
+            'service': {
+                'status': 'disabled',
+                'state': 'up',
+                'binary': 'nova-compute',
+                'host': 'fake-compute-host',
+                'zone': 'nova',  # Comes from CONF.default_availability_zone
+                'updated_at': mock.sentinel.updated_time,
+                'disabled_reason': 'maintenance',
+                'id': service.uuid,
+                'forced_down': True
+            }
+        }
+        self.assertDictEqual(expected_resp, resp)
+
+    def test_update_forced_down_invalid_value(self):
+        """Tests that passing an invalid value for forced_down results in
+        a validation error.
+        """
+        service = self.start_service(
+            'compute', 'fake-compute-host').service_ref
+        self.assertRaises(exception.ValidationError,
+                          self.controller.update,
+                          self.req, service.uuid,
+                          body={'status': 'disabled',
+                                'disabled_reason': 'maintenance',
+                                'forced_down': 'invalid'})
+
+    def test_update_forced_down_invalid_service(self):
+        """Tests that you can't update a non-nova-compute service."""
+        service = self.start_service(
+            'scheduler', 'fake-scheduler-host').service_ref
+        ex = self.assertRaises(webob.exc.HTTPBadRequest,
+                               self.controller.update,
+                               self.req, service.uuid,
+                               body={'forced_down': True})
+        self.assertEqual('Updating a nova-scheduler service is not supported. '
+                         'Only nova-compute services can be updated.',
+                         six.text_type(ex))
+
+    def test_update_empty_body(self):
+        """Tests that the caller gets a 400 error if they don't request any
+        updates.
+        """
+        service = self.start_service('compute').service_ref
+        ex = self.assertRaises(webob.exc.HTTPBadRequest,
+                               self.controller.update,
+                               self.req, service.uuid, body={})
+        self.assertEqual("No updates were requested. Fields 'status' or "
+                         "'forced_down' should be specified.",
+                         six.text_type(ex))
+
+    def test_update_only_disabled_reason(self):
+        """Tests that the caller gets a 400 error if they only specify
+        disabled_reason but don't also specify status='disabled'.
+        """
+        service = self.start_service('compute').service_ref
+        ex = self.assertRaises(webob.exc.HTTPBadRequest,
+                               self.controller.update, self.req, service.uuid,
+                               body={'disabled_reason': 'missing status'})
+        self.assertEqual("No updates were requested. Fields 'status' or "
+                         "'forced_down' should be specified.",
+                         six.text_type(ex))
+
 
 class ServicesCellsTestV21(test.TestCase):
 
@@ -873,8 +1154,6 @@ class ServicesCellsTestV21(test.TestCase):
 
         host_api = compute.cells_api.HostAPI()
 
-        self.ext_mgr = extensions.ExtensionManager()
-        self.ext_mgr.extensions = {}
         self._set_up_controller()
         self.controller.host_api = host_api
 
@@ -899,7 +1178,6 @@ class ServicesCellsTestV21(test.TestCase):
             res.pop('disabled_reason')
 
     def test_services_detail(self):
-        self.ext_mgr.extensions['os-extended-services-delete'] = True
         req = FakeRequest()
         res_dict = self.controller.index(req)
         utc = iso8601.iso8601.Utc()

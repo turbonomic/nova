@@ -19,14 +19,10 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-console-output'
-POLICY_ROOT = 'os_compute_api:os-console-output:%s'
 
 
 console_output_policies = [
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'discoverable',
-        check_str=base.RULE_ANY),
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         BASE_POLICY_NAME,
         base.RULE_ADMIN_OR_OWNER,
         'Show console output for a server',

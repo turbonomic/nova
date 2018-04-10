@@ -68,8 +68,10 @@ class BlockDeviceManagerTestCase(test_base.HyperVBaseTestCase):
             'ephemerals': [ephemeral],
         }
 
-        bdm = self._bdm_mock(device_name=mock.sentinel.dev0, tag='taggy')
-        eph = self._bdm_mock(device_name=mock.sentinel.dev1, tag='ephy')
+        bdm = self._bdm_mock(device_name=mock.sentinel.dev0, tag='taggy',
+                             volume_id=mock.sentinel.uuid1)
+        eph = self._bdm_mock(device_name=mock.sentinel.dev1, tag='ephy',
+                             volume_id=mock.sentinel.uuid2)
         mock_get_by_inst_uuid.return_value = [
             bdm, eph, self._bdm_mock(device_name=mock.sentinel.dev2, tag=None),
         ]
@@ -83,8 +85,10 @@ class BlockDeviceManagerTestCase(test_base.HyperVBaseTestCase):
         mock_get_device_bus.assert_has_calls(
           [mock.call(root_disk), mock.call(ephemeral)], any_order=True)
         mock_DiskMetadata.assert_has_calls(
-            [mock.call(bus=mock_get_device_bus.return_value, tags=[bdm.tag]),
-             mock.call(bus=mock_get_device_bus.return_value, tags=[eph.tag])],
+            [mock.call(bus=mock_get_device_bus.return_value,
+                       serial=bdm.volume_id, tags=[bdm.tag]),
+             mock.call(bus=mock_get_device_bus.return_value,
+                       serial=eph.volume_id, tags=[eph.tag])],
             any_order=True)
         self.assertEqual([mock_DiskMetadata.return_value] * 2, bdm_metadata)
 
@@ -215,6 +219,9 @@ class BlockDeviceManagerTestCase(test_base.HyperVBaseTestCase):
 
     def test_check_and_update_root_device_gen1(self):
         self._test_check_and_update_root_device(disk_format='vhd')
+
+    def test_check_and_update_root_device_gen1_vhdx(self):
+        self._test_check_and_update_root_device(disk_format='vhdx')
 
     def test_check_and_update_root_device_gen1_iso(self):
         self._test_check_and_update_root_device(disk_format='iso')
@@ -404,7 +411,8 @@ class BlockDeviceManagerTestCase(test_base.HyperVBaseTestCase):
         res = self._bdman._get_boot_order_gen1(fake_bdi)
         self.assertEqual(expected, res)
 
-    def test_get_boot_order_gen2(self):
+    @mock.patch('nova.virt.hyperv.volumeops.VolumeOps.get_disk_resource_path')
+    def test_get_boot_order_gen2(self, mock_get_disk_path):
         fake_root_disk = {'boot_index': 0,
                           'path': mock.sentinel.FAKE_ROOT_PATH}
         fake_eph1 = {'boot_index': 2,
@@ -418,8 +426,7 @@ class BlockDeviceManagerTestCase(test_base.HyperVBaseTestCase):
                                    fake_eph2],
                     'block_device_mapping': [fake_bdm]}
 
-        self._bdman._volops.get_mounted_disk_path_from_volume = (
-            mock.MagicMock(return_value=fake_bdm['connection_info']))
+        mock_get_disk_path.return_value = fake_bdm['connection_info']
 
         expected_res = [mock.sentinel.FAKE_ROOT_PATH,
                         mock.sentinel.FAKE_CONN_INFO,

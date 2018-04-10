@@ -26,7 +26,7 @@ from oslo_utils import excutils
 import nova.conf
 from nova import context
 from nova import db
-from nova.i18n import _, _LE
+from nova.i18n import _
 from nova import utils
 
 
@@ -87,7 +87,8 @@ class XVPConsoleProxy(object):
         conf_data = {'multiplex_port': CONF.xvp.console_xvp_multiplex_port,
                      'pools': pools}
         tmpl_path, tmpl_file = os.path.split(CONF.injected_network_template)
-        env = jinja2.Environment(loader=jinja2.FileSystemLoader(tmpl_path))
+        env = jinja2.Environment(  # nosec
+            loader=jinja2.FileSystemLoader(tmpl_path))  # nosec
         env.filters['pass_encode'] = self.fix_console_password
         template = env.get_template(tmpl_file)
         self._write_conf(template.render(conf_data))
@@ -100,7 +101,7 @@ class XVPConsoleProxy(object):
                 cfile.write(config)
         except IOError:
             with excutils.save_and_reraise_exception():
-                LOG.exception(_LE("Failed to write configuration file"))
+                LOG.exception("Failed to write configuration file")
 
     def _xvp_stop(self):
         LOG.debug('Stopping xvp')
@@ -123,7 +124,7 @@ class XVPConsoleProxy(object):
                           '-c', CONF.xvp.console_xvp_conf,
                           '-l', CONF.xvp.console_xvp_log)
         except processutils.ProcessExecutionError as err:
-            LOG.error(_LE('Error starting xvp: %s'), err)
+            LOG.error('Error starting xvp: %s', err)
 
     def _xvp_restart(self):
         LOG.debug('Restarting xvp')

@@ -23,10 +23,7 @@ POLICY_ROOT = 'os_compute_api:os-cells:%s'
 
 
 cells_policies = [
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'discoverable',
-        check_str=base.RULE_ANY),
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         POLICY_ROOT % 'update',
         base.RULE_ADMIN_API,
         'Update an existing cell',
@@ -36,7 +33,7 @@ cells_policies = [
                 'path': '/os-cells/{cell_id}'
             }
         ]),
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         POLICY_ROOT % 'create',
         base.RULE_ADMIN_API,
         'Create a new cell',
@@ -46,10 +43,10 @@ cells_policies = [
                 'path': '/os-cells'
             }
         ]),
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         BASE_POLICY_NAME,
         base.RULE_ADMIN_API,
-        'List and get detailed info of a given cell or all cells',
+        'List and show detailed info for a given cell or all cells',
         [
             {
                 'method': 'GET',
@@ -72,7 +69,7 @@ cells_policies = [
                 'path': '/os-cells/{cell_id}'
             }
         ]),
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         POLICY_ROOT % 'sync_instances',
         base.RULE_ADMIN_API,
         'Sync instances info in all cells',
@@ -82,7 +79,7 @@ cells_policies = [
                 'path': '/os-cells/sync_instances'
             }
         ]),
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         POLICY_ROOT % 'delete',
         base.RULE_ADMIN_API,
         'Remove a cell',

@@ -20,7 +20,6 @@
 import contextlib
 import copy
 import datetime
-import errno
 import functools
 import hashlib
 import inspect
@@ -33,9 +32,7 @@ import socket
 import struct
 import sys
 import tempfile
-import textwrap
 import time
-from xml.sax import saxutils
 
 import eventlet
 import netaddr
@@ -161,13 +158,6 @@ def get_root_helper():
     else:
         cmd = 'sudo nova-rootwrap %s' % CONF.rootwrap_config
     return cmd
-
-
-def _get_rootwrap_helper():
-    if CONF.use_rootwrap_daemon:
-        return RootwrapDaemonHelper(CONF.rootwrap_config)
-    else:
-        return RootwrapProcessHelper()
 
 
 class RootwrapProcessHelper(object):
@@ -330,11 +320,6 @@ DEFAULT_PASSWORD_SYMBOLS = ('23456789',  # Removed: 0,1
                             'abcdefghijkmnopqrstuvwxyz')  # Removed: l
 
 
-# ~5 bits per symbol
-EASIER_PASSWORD_SYMBOLS = ('23456789',  # Removed: 0, 1
-                           'ABCDEFGHJKLMNPQRSTUVWXYZ')  # Removed: I, O
-
-
 def last_completed_audit_period(unit=None, before=None):
     """This method gives you the most recently *completed* audit period.
 
@@ -480,13 +465,7 @@ def get_my_linklocal(interface):
         raise exception.NovaException(msg)
 
 
-def xhtml_escape(value):
-    """Escapes a string so it is valid within XML or XHTML.
-
-    """
-    return saxutils.escape(value, {'"': '&quot;', "'": '&apos;'})
-
-
+# TODO(sfinucan): Replace this with the equivalent from oslo.utils
 def utf8(value):
     """Try to turn a string into utf-8 if possible.
 
@@ -501,13 +480,6 @@ def utf8(value):
         value = six.text_type(value)
 
     return value.encode('utf-8')
-
-
-def check_isinstance(obj, cls):
-    """Checks that obj is of type cls, and lets PyLint infer types."""
-    if isinstance(obj, cls):
-        return obj
-    raise Exception(_('Expected object of type: %s') % (str(cls)))
 
 
 def parse_server_string(server_str):
@@ -539,14 +511,6 @@ def parse_server_string(server_str):
         return ('', '')
 
 
-def is_valid_ipv6_cidr(address):
-    try:
-        netaddr.IPNetwork(address, version=6).cidr
-        return True
-    except (TypeError, netaddr.AddrFormatError):
-        return False
-
-
 def get_shortened_ipv6(address):
     addr = netaddr.IPAddress(address, version=6)
     return str(addr.ipv6())
@@ -555,29 +519,6 @@ def get_shortened_ipv6(address):
 def get_shortened_ipv6_cidr(address):
     net = netaddr.IPNetwork(address, version=6)
     return str(net.cidr)
-
-
-def is_valid_cidr(address):
-    """Check if address is valid
-
-    The provided address can be a IPv6 or a IPv4
-    CIDR address.
-    """
-    try:
-        # Validate the correct CIDR Address
-        netaddr.IPNetwork(address)
-    except netaddr.AddrFormatError:
-        return False
-
-    # Prior validation partially verify /xx part
-    # Verify it here
-    ip_segment = address.split('/')
-
-    if (len(ip_segment) <= 1 or
-            ip_segment[1] == ''):
-        return False
-
-    return True
 
 
 def get_ip_version(network):
@@ -893,30 +834,6 @@ def mkfs(fs, path, label=None, run_as_root=False):
         args.extend([label_opt, label])
     args.append(path)
     execute(*args, run_as_root=run_as_root)
-
-
-def last_bytes(file_like_object, num):
-    """Return num bytes from the end of the file, and remaining byte count.
-
-    :param file_like_object: The file to read
-    :param num: The number of bytes to return
-
-    :returns: (data, remaining)
-    """
-
-    try:
-        file_like_object.seek(-num, os.SEEK_END)
-    except IOError as e:
-        # seek() fails with EINVAL when trying to go before the start of the
-        # file. It means that num is larger than the file size, so just
-        # go to the start.
-        if e.errno == errno.EINVAL:
-            file_like_object.seek(0, os.SEEK_SET)
-        else:
-            raise
-
-    remaining = file_like_object.tell()
-    return (file_like_object.read(), remaining)
 
 
 def metadata_to_dict(metadata, include_deleted=False):
@@ -1258,6 +1175,18 @@ def get_sha256_str(base_str):
     return hashlib.sha256(base_str).hexdigest()
 
 
+def get_obj_repr_unicode(obj):
+    """Returns a string representation of an object converted to unicode.
+
+    In the case of python 3, this just returns the repr() of the object,
+    else it converts the repr() to unicode.
+    """
+    obj_repr = repr(obj)
+    if not six.PY3:
+        obj_repr = six.text_type(obj_repr, 'utf-8')
+    return obj_repr
+
+
 def filter_and_format_resource_metadata(resource_type, resource_list,
         search_filts, metadata_type=None):
     """Get all metadata for a list of resources after filtering.
@@ -1430,7 +1359,7 @@ def strtime(at):
     return at.strftime("%Y-%m-%dT%H:%M:%S.%f")
 
 
-def print_dict(dct, dict_property="Property", wrap=0, dict_value='Value'):
+def print_dict(dct, dict_property="Property", dict_value='Value'):
     """Print a `dict` as a table of two columns.
 
     :param dct: `dict` to print
@@ -1444,8 +1373,6 @@ def print_dict(dct, dict_property="Property", wrap=0, dict_value='Value'):
         # convert dict to str to check length
         if isinstance(v, dict):
             v = six.text_type(v)
-        if wrap > 0:
-            v = textwrap.fill(six.text_type(v), wrap)
         # if value has a newline, add in multiple rows
         # e.g. fault with stacktrace
         if v and isinstance(v, six.string_types) and r'\n' in v:

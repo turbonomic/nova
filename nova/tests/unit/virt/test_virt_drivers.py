@@ -125,8 +125,8 @@ class _FakeDriverBackendTestCase(object):
         def fake_make_drive(_self, _path):
             pass
 
-        def fake_get_instance_disk_info_from_xml(_self, instance, xml,
-                                                 block_device_info):
+        def fake_get_instance_disk_info_from_config(
+                _self, guest_config, block_device_info):
             return []
 
         def fake_delete_instance_files(_self, _instance):
@@ -136,23 +136,19 @@ class _FakeDriverBackendTestCase(object):
             pass
 
         def fake_detach_device_with_retry(_self, get_device_conf_func, device,
-                                          persistent, live,
-                                          max_retry_count=7,
-                                          inc_sleep_time=2,
-                                          max_sleep_time=30):
+                                          live, *args, **kwargs):
             # Still calling detach, but instead of returning function
             # that actually checks if device is gone from XML, just continue
             # because XML never gets updated in these tests
             _self.detach_device(get_device_conf_func(device),
-                                persistent=persistent,
                                 live=live)
             return fake_wait
 
         import nova.virt.libvirt.driver
 
         self.stubs.Set(nova.virt.libvirt.driver.LibvirtDriver,
-                       '_get_instance_disk_info_from_xml',
-                       fake_get_instance_disk_info_from_xml)
+                       '_get_instance_disk_info_from_config',
+                       fake_get_instance_disk_info_from_config)
 
         self.stubs.Set(nova.virt.libvirt.driver.disk_api,
                        'extend', fake_extend)
@@ -469,7 +465,9 @@ class _VirtDriverTestCase(_FakeDriverBackendTestCase):
         self.assertEqual(storage_ip, result['ip'])
 
     @catch_notimplementederror
-    def test_attach_detach_volume(self):
+    @mock.patch.object(libvirt.driver.LibvirtDriver, '_build_device_metadata',
+                       return_value=objects.InstanceDeviceMetadata())
+    def test_attach_detach_volume(self, _):
         instance_ref, network_info = self._get_running_instance()
         connection_info = {
             "driver_volume_type": "fake",
@@ -484,7 +482,9 @@ class _VirtDriverTestCase(_FakeDriverBackendTestCase):
                                           '/dev/sda'))
 
     @catch_notimplementederror
-    def test_swap_volume(self):
+    @mock.patch.object(libvirt.driver.LibvirtDriver, '_build_device_metadata',
+                       return_value=objects.InstanceDeviceMetadata())
+    def test_swap_volume(self, _):
         instance_ref, network_info = self._get_running_instance()
         self.assertIsNone(
             self.connection.attach_volume(None, {'driver_volume_type': 'fake',
@@ -500,7 +500,9 @@ class _VirtDriverTestCase(_FakeDriverBackendTestCase):
                                         '/dev/sda', 2))
 
     @catch_notimplementederror
-    def test_attach_detach_different_power_states(self):
+    @mock.patch.object(libvirt.driver.LibvirtDriver, '_build_device_metadata',
+                       return_value=objects.InstanceDeviceMetadata())
+    def test_attach_detach_different_power_states(self, _):
         instance_ref, network_info = self._get_running_instance()
         connection_info = {
             "driver_volume_type": "fake",

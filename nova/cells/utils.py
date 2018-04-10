@@ -34,7 +34,7 @@ PATH_CELL_SEP = '!'
 # meaningful PATH_CELL_SEP in an invalid way will need to suffice.
 BLOCK_SYNC_FLAG = '!!'
 # Separator used between cell name and item
-_CELL_ITEM_SEP = '@'
+CELL_ITEM_SEP = '@'
 
 CONF = nova.conf.CONF
 
@@ -68,6 +68,20 @@ class _CellProxy(object):
             return self.host
 
         return getattr(self._obj, key)
+
+    def __contains__(self, key):
+        """Pass-through "in" check to the wrapped object.
+
+        This is needed to proxy any types of checks in the calling code
+        like::
+
+          if 'availability_zone' in service:
+              ...
+
+        :param key: They key to look for in the wrapped object.
+        :returns: True if key is in the wrapped object, False otherwise.
+        """
+        return key in self._obj
 
     def obj_to_primitive(self):
         obj_p = self._obj.obj_to_primitive()
@@ -178,12 +192,12 @@ def cell_with_item(cell_name, item):
     """Turn cell_name and item into <cell_name>@<item>."""
     if cell_name is None:
         return item
-    return cell_name + _CELL_ITEM_SEP + str(item)
+    return cell_name + CELL_ITEM_SEP + str(item)
 
 
 def split_cell_and_item(cell_and_item):
     """Split a combined cell@item and return them."""
-    result = cell_and_item.rsplit(_CELL_ITEM_SEP, 1)
+    result = cell_and_item.rsplit(CELL_ITEM_SEP, 1)
     if len(result) == 1:
         return (None, cell_and_item)
     else:

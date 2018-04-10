@@ -27,8 +27,7 @@ from oslo_utils import importutils
 import six
 
 import nova.conf
-from nova.i18n import _, _LE, _LI
-from nova import utils
+from nova.i18n import _
 from nova.virt import event as virtevent
 
 CONF = nova.conf.CONF
@@ -128,7 +127,17 @@ class ComputeDriver(object):
         "supports_migrate_to_same_host": False,
         "supports_attach_interface": False,
         "supports_device_tagging": False,
+        "supports_tagged_attach_interface": False,
+        "supports_tagged_attach_volume": False,
+        "supports_extend_volume": False,
     }
+
+    requires_allocation_refresh = False
+
+    # Indicates if this driver will rebalance nodes among compute service
+    # hosts. This is really here for ironic and should not be used by any
+    # other driver.
+    rebalances_nodes = False
 
     def __init__(self, virtapi):
         self.virtapi = virtapi
@@ -148,11 +157,10 @@ class ComputeDriver(object):
         pass
 
     def get_info(self, instance):
-        """Get the current status of an instance, by name (not ID!)
+        """Get the current status of an instance.
 
         :param instance: nova.objects.instance.Instance object
-
-        Returns a InstanceInfo object
+        :returns: An InstanceInfo object
         """
         # TODO(Vek): Need to pass context in for access to auth_token
         raise NotImplementedError()
@@ -286,7 +294,7 @@ class ComputeDriver(object):
         raise NotImplementedError()
 
     def destroy(self, context, instance, network_info, block_device_info=None,
-                destroy_disks=True, migrate_data=None):
+                destroy_disks=True):
         """Destroy the specified instance from the Hypervisor.
 
         If the instance is not found (for example if networking failed), this
@@ -299,7 +307,6 @@ class ComputeDriver(object):
         :param block_device_info: Information about block devices that should
                                   be detached from the instance.
         :param destroy_disks: Indicates if disks should be destroyed
-        :param migrate_data: implementation specific params
         """
         raise NotImplementedError()
 
@@ -441,7 +448,7 @@ class ComputeDriver(object):
         raise NotImplementedError()
 
     def get_host_ip_addr(self):
-        """Retrieves the IP address of the dom0
+        """Retrieves the IP address of the host running compute service
         """
         # TODO(Vek): Need to pass context in for access to auth_token
         raise NotImplementedError()
@@ -474,6 +481,18 @@ class ComputeDriver(object):
         :param int resize_to:
             If the new volume is larger than the old volume, it gets resized
             to the given size (in Gigabyte) of `resize_to`.
+
+        :return: None
+        """
+        raise NotImplementedError()
+
+    def extend_volume(self, connection_info, instance):
+        """Extend the disk attached to the instance.
+
+        :param dict connection_info:
+            The connection for the extended volume.
+        :param nova.objects.instance.Instance instance:
+            The instance whose volume gets extended.
 
         :return: None
         """
@@ -804,6 +823,7 @@ class ComputeDriver(object):
         :param network_info: instance network information
         :param disk_info: instance disk information
         :param migrate_data: a LiveMigrateData object
+        :returns: migrate_data modified by the driver
         """
         raise NotImplementedError()
 
@@ -1161,8 +1181,7 @@ class ComputeDriver(object):
         raise NotImplementedError()
 
     def get_host_uptime(self):
-        """Returns the result of calling the Linux command `uptime` on this
-        host.
+        """Returns the result of the time since start up of this hypervisor.
 
         :return: A text which contains the uptime of this host since the
                  last boot.
@@ -1445,7 +1464,7 @@ class ComputeDriver(object):
             LOG.debug("Emitting event %s", six.text_type(event))
             self._compute_event_callback(event)
         except Exception as ex:
-            LOG.error(_LE("Exception dispatching event %(event)s: %(ex)s"),
+            LOG.error("Exception dispatching event %(event)s: %(ex)s",
                       {'event': event, 'ex': ex})
 
     def delete_instance_files(self, instance):
@@ -1614,17 +1633,23 @@ def load_compute_driver(virtapi, compute_driver=None):
         compute_driver = CONF.compute_driver
 
     if not compute_driver:
-        LOG.error(_LE("Compute driver option required, but not specified"))
+        LOG.error("Compute driver option required, but not specified")
         sys.exit(1)
 
-    LOG.info(_LI("Loading compute driver '%s'"), compute_driver)
+    LOG.info("Loading compute driver '%s'", compute_driver)
     try:
         driver = importutils.import_object(
             'nova.virt.%s' % compute_driver,
             virtapi)
-        return utils.check_isinstance(driver, ComputeDriver)
+        if isinstance(driver, ComputeDriver):
+            return driver
+        raise ValueError()
     except ImportError:
-        LOG.exception(_LE("Unable to load the virtualization driver"))
+        LOG.exception(_("Unable to load the virtualization driver"))
+        sys.exit(1)
+    except ValueError:
+        LOG.exception("Compute driver '%s' from 'nova.virt' is not of type"
+                      "'%s'", compute_driver, str(ComputeDriver))
         sys.exit(1)
 
 

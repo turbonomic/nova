@@ -258,7 +258,7 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
         res = list(image_cache_manager._find_base_file(base_dir, fingerprint))
 
         base_file = os.path.join(base_dir, fingerprint + '_sm')
-        self.assertEqual(res, [(base_file, True, False)])
+        self.assertEqual([base_file], res)
 
     def test_find_base_file_resized(self):
         fingerprint = '968dd6cc49e01aaa044ed11c0cce733e0fa44a6a'
@@ -278,7 +278,7 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
         res = list(image_cache_manager._find_base_file(base_dir, fingerprint))
 
         base_file = os.path.join(base_dir, fingerprint + '_10737418240')
-        self.assertEqual(res, [(base_file, False, True)])
+        self.assertEqual([base_file], res)
 
     def test_find_base_file_all(self):
         fingerprint = '968dd6cc49e01aaa044ed11c0cce733e0fa44a6a'
@@ -300,9 +300,7 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
         base_file1 = os.path.join(base_dir, fingerprint)
         base_file2 = os.path.join(base_dir, fingerprint + '_sm')
         base_file3 = os.path.join(base_dir, fingerprint + '_10737418240')
-        self.assertEqual(res, [(base_file1, False, False),
-                               (base_file2, True, False),
-                               (base_file3, False, True)])
+        self.assertEqual([base_file1, base_file2, base_file3], res)
 
     @contextlib.contextmanager
     def _make_base_file(self, lock=True, info=False):
@@ -432,76 +430,17 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
                 self.assertNotEqual(stream.getvalue().find('Failed to remove'),
                                     -1)
 
-    def test_handle_base_image_unused(self):
-        img = '123'
-
-        with self._make_base_file() as fname:
-            os.utime(fname, (-1, time.time() - 3601))
-
-            image_cache_manager = imagecache.ImageCacheManager()
-            image_cache_manager.unexplained_images = [fname]
-            image_cache_manager._handle_base_image(img, fname)
-
-            self.assertEqual(image_cache_manager.unexplained_images, [])
-            self.assertEqual(image_cache_manager.removable_base_files, [fname])
-
     @mock.patch.object(libvirt_utils, 'update_mtime')
-    def test_handle_base_image_used(self, mock_mtime):
+    def test_mark_in_use(self, mock_mtime):
         img = '123'
 
         with self._make_base_file() as fname:
             image_cache_manager = imagecache.ImageCacheManager()
             image_cache_manager.unexplained_images = [fname]
             image_cache_manager.used_images = {'123': (1, 0, ['banana-42'])}
-            image_cache_manager._handle_base_image(img, fname)
+            image_cache_manager._mark_in_use(img, fname)
 
             mock_mtime.assert_called_once_with(fname)
-            self.assertEqual(image_cache_manager.unexplained_images, [])
-            self.assertEqual(image_cache_manager.removable_base_files, [])
-
-    @mock.patch.object(libvirt_utils, 'update_mtime')
-    def test_handle_base_image_used_remotely(self, mock_mtime):
-        img = '123'
-
-        with self._make_base_file() as fname:
-            image_cache_manager = imagecache.ImageCacheManager()
-            image_cache_manager.unexplained_images = [fname]
-            image_cache_manager.used_images = {'123': (0, 1, ['banana-42'])}
-            image_cache_manager._handle_base_image(img, fname)
-
-            mock_mtime.assert_called_once_with(fname)
-            self.assertEqual(image_cache_manager.unexplained_images, [])
-            self.assertEqual(image_cache_manager.removable_base_files, [])
-
-    def test_handle_base_image_absent(self):
-        img = '123'
-
-        with intercept_log_messages() as stream:
-            image_cache_manager = imagecache.ImageCacheManager()
-            image_cache_manager.used_images = {'123': (1, 0, ['banana-42'])}
-            image_cache_manager._handle_base_image(img, None)
-
-            self.assertEqual(image_cache_manager.unexplained_images, [])
-            self.assertEqual(image_cache_manager.removable_base_files, [])
-            self.assertNotEqual(stream.getvalue().find('an absent base file'),
-                                -1)
-
-    def test_handle_base_image_used_missing(self):
-        img = '123'
-
-        with utils.tempdir() as tmpdir:
-            self.flags(instances_path=tmpdir)
-            self.flags(image_info_filename_pattern=('$instances_path/'
-                                                    '%(image)s.info'),
-                       group='libvirt')
-
-            fname = os.path.join(tmpdir, 'aaa')
-
-            image_cache_manager = imagecache.ImageCacheManager()
-            image_cache_manager.unexplained_images = [fname]
-            image_cache_manager.used_images = {'123': (1, 0, ['banana-42'])}
-            image_cache_manager._handle_base_image(img, fname)
-
             self.assertEqual(image_cache_manager.unexplained_images, [])
             self.assertEqual(image_cache_manager.removable_base_files, [])
 

@@ -147,18 +147,6 @@ class Request(wsgi.Request):
     def get_db_flavor(self, flavorid):
         return self.get_db_item('flavors', flavorid)
 
-    def cache_db_compute_nodes(self, compute_nodes):
-        self.cache_db_items('compute_nodes', compute_nodes, 'id')
-
-    def cache_db_compute_node(self, compute_node):
-        self.cache_db_items('compute_nodes', [compute_node], 'id')
-
-    def get_db_compute_nodes(self):
-        return self.get_db_items('compute_nodes')
-
-    def get_db_compute_node(self, id):
-        return self.get_db_item('compute_nodes', id)
-
     def best_match_content_type(self):
         """Determine the requested response content-type."""
         if 'nova.best_content_type' not in self.environ:
@@ -625,13 +613,7 @@ class Resource(wsgi.Application):
 
         # Now, deserialize the request body...
         try:
-            contents = {}
-            if self._should_have_body(request):
-                # allow empty body with PUT and POST
-                if request.content_length == 0:
-                    contents = {'body': None}
-                else:
-                    contents = self.deserialize(body)
+            contents = self._get_request_content(body, request)
         except exception.MalformedRequestBody:
             msg = _("Malformed request body")
             return Fault(webob.exc.HTTPBadRequest(explanation=msg))
@@ -698,6 +680,16 @@ class Resource(wsgi.Application):
                 response.headers.add('Vary', LEGACY_API_VERSION_REQUEST_HEADER)
 
         return response
+
+    def _get_request_content(self, body, request):
+        contents = {}
+        if self._should_have_body(request):
+            # allow empty body with PUT and POST
+            if request.content_length == 0 or request.content_length is None:
+                contents = {'body': None}
+            else:
+                contents = self.deserialize(body)
+        return contents
 
     def get_method(self, request, action, content_type, body):
         meth, extensions = self._get_method(request,

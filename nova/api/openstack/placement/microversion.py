@@ -41,6 +41,13 @@ VERSIONS = [
             # that are members of any of the listed aggregates
     '1.4',  # Adds resources query string parameter in GET /resource_providers
     '1.5',  # Adds DELETE /resource_providers/{uuid}/inventories
+    '1.6',  # Adds /traits and /resource_providers{uuid}/traits resource
+            # endpoints
+    '1.7',  # PUT /resource_classes/{name} is bodiless create or update
+    '1.8',  # Adds 'project_id' and 'user_id' required request parameters to
+            # PUT /allocations
+    '1.9',  # Adds GET /usages
+    '1.10',  # Adds GET /allocation_candidates resource endpoint
 ]
 
 

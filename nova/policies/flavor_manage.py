@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+
 from oslo_policy import policy
 
 from nova.policies import base
@@ -20,15 +21,47 @@ from nova.policies import base
 
 BASE_POLICY_NAME = 'os_compute_api:os-flavor-manage'
 POLICY_ROOT = 'os_compute_api:os-flavor-manage:%s'
+BASE_POLICY_RULE = 'rule:%s' % BASE_POLICY_NAME
 
 
 flavor_manage_policies = [
-    policy.RuleDefault(
-        name=BASE_POLICY_NAME,
-        check_str=base.RULE_ADMIN_API),
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'discoverable',
-        check_str=base.RULE_ANY),
+    # TODO(rb560u): remove this rule in future release
+    policy.DocumentedRuleDefault(
+        BASE_POLICY_NAME,
+        base.RULE_ADMIN_API,
+        "Create and delete Flavors. Deprecated in Pike and will be "
+        "removed in future release",
+        [
+            {
+                'method': 'POST',
+                'path': '/flavors'
+            },
+            {
+                'method': 'DELETE',
+                'path': '/flavors/{flavor_id}'
+            },
+
+        ]),
+    policy.DocumentedRuleDefault(
+        POLICY_ROOT % 'create',
+        BASE_POLICY_RULE,
+        "Create a flavor",
+        [
+            {
+                'method': 'POST',
+                'path': '/flavors'
+            }
+        ]),
+    policy.DocumentedRuleDefault(
+        POLICY_ROOT % 'delete',
+        BASE_POLICY_RULE,
+        "Delete a flavor",
+        [
+            {
+                'method': 'DELETE',
+                'path': '/flavors/{flavor_id}'
+            }
+        ]),
 ]
 
 

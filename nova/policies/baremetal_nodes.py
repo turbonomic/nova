@@ -19,14 +19,10 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-baremetal-nodes'
-POLICY_ROOT = 'os_compute_api:os-baremetal-nodes:%s'
 
 
 baremetal_nodes_policies = [
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'discoverable',
-        check_str=base.RULE_ANY),
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         BASE_POLICY_NAME,
         base.RULE_ADMIN_API,
         """List and show details of bare metal nodes.

@@ -89,3 +89,66 @@ Placement API version 1.5 adds DELETE method for deleting all inventory for a
 resource provider. The following new method is supported:
 
 * DELETE /resource_providers/{uuid}/inventories
+
+1.6 Traits API
+--------------
+
+The 1.6 version adds basic operations allowing an admin to create, list, and
+delete custom traits, also adds basic operations allowing an admin to attach
+traits to a resource provider.
+
+The following new routes are added:
+
+* GET /traits: Returns all resource classes.
+* PUT /traits/{name}: To insert a single custom trait.
+* GET /traits/{name}: To check if a trait name exists.
+* DELETE /traits/{name}: To delete the specified trait.
+* GET /resource_providers/{uuid}/traits: a list of traits associated
+  with a specific resource provider
+* PUT /resource_providers/{uuid}/traits: Set all the traits for a
+  specific resource provider
+* DELETE /resource_providers/{uuid}/traits: Remove any existing trait
+  associations for a specific resource provider
+
+Custom traits must begin with the prefix "CUSTOM\_" and contain only
+the letters A through Z, the numbers 0 through 9 and the underscore "\_"
+character.
+
+1.7 Idempotent PUT /resource_classes/{name}
+-------------------------------------------
+
+The 1.7 version changes handling of `PUT /resource_classes/{name}` to be a
+create or verification of the resource class with `{name}`. If the resource
+class is a custom resource class and does not already exist it will be created
+and a ``201`` response code returned. If the class already exists the response
+code will be ``204``. This makes it possible to check or create a resource
+class in one request.
+
+1.8 Require placement 'project_id', 'user_id' in PUT /allocations
+-----------------------------------------------------------------
+
+The 1.8 version adds ``project_id`` and ``user_id`` required request parameters
+to ``PUT /allocations``.
+
+1.9 Add GET /usages
+--------------------
+
+The 1.9 version adds usages that can be queried by a project or project/user.
+
+The following new routes are added:
+
+``GET /usages?project_id=<project_id>``
+
+   Returns all usages for a given project.
+
+``GET /usages?project_id=<project_id>&user_id=<user_id>``
+
+   Returns all usages for a given project and user.
+
+1.10 Allocation candidates
+-------------------------------------------
+
+The 1.10 version brings a new REST resource endpoint for getting a list of
+allocation candidates. Allocation candidates are collections of possible
+allocations against resource providers that can satisfy a particular request
+for resources.

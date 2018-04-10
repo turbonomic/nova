@@ -155,8 +155,9 @@ def get_injected_network_template(network_info, template=None,
         return
 
     tmpl_path, tmpl_file = os.path.split(template)
-    env = jinja2.Environment(loader=jinja2.FileSystemLoader(tmpl_path),
-                             trim_blocks=True)
+    env = jinja2.Environment(  # nosec
+        loader=jinja2.FileSystemLoader(tmpl_path),  # nosec
+        trim_blocks=True)
     template = env.get_template(tmpl_file)
     return template.render({'interfaces': nets,
                             'use_ipv6': ipv6_is_available,
@@ -236,10 +237,10 @@ def _get_eth_link(vif, ifc_num):
         link_id = 'interface%d' % ifc_num
 
     # Use 'phy' for physical links. Ethernet can be confusing
-    if vif.get('type') == 'ethernet':
-        nic_type = 'phy'
-    else:
+    if vif.get('type') in model.LEGACY_EXPOSED_VIF_TYPES:
         nic_type = vif.get('type')
+    else:
+        nic_type = 'phy'
 
     link = {
         'id': link_id,
@@ -261,7 +262,10 @@ def _get_nets(vif, subnet, version, net_num, link_id):
     :param link_id: Arbitrary identifier for the link the networks are
         attached to
     """
-    if subnet.get_meta('dhcp_server') is not None:
+    net_type = ''
+    if subnet.get_meta('ipv6_address_mode') is not None:
+        net_type = '_%s' % subnet.get_meta('ipv6_address_mode')
+    elif subnet.get_meta('dhcp_server') is not None:
         net_info = {
             'id': 'network%d' % net_num,
             'type': 'ipv%d_dhcp' % version,
@@ -279,7 +283,7 @@ def _get_nets(vif, subnet, version, net_num, link_id):
 
     net_info = {
         'id': 'network%d' % net_num,
-        'type': 'ipv%d' % version,
+        'type': 'ipv%d%s' % (version, net_type),
         'link': link_id,
         'ip_address': address,
         'netmask': netmask,
@@ -296,6 +300,8 @@ def _get_nets(vif, subnet, version, net_num, link_id):
             'gateway': route['gateway']['address']
         }
         net_info['routes'].append(new_route)
+
+    net_info['services'] = _get_dns_services(subnet)
 
     return net_info
 

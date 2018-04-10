@@ -21,14 +21,13 @@ import webob.exc
 from nova.api.openstack import extensions
 from nova.api.openstack import wsgi
 from nova import compute
+from nova.compute import rpcapi as compute_rpcapi
 import nova.conf
 from nova.i18n import _
 from nova.policies import instance_usage_audit_log as iual_policies
 from nova import utils
 
 CONF = nova.conf.CONF
-
-ALIAS = 'os-instance-usage-audit-log'
 
 
 class InstanceUsageAuditLogController(wsgi.Controller):
@@ -74,7 +73,7 @@ class InstanceUsageAuditLogController(wsgi.Controller):
                                                    begin, end)
         # We do this in this way to include disabled compute services,
         # which can have instances on them. (mdragon)
-        filters = {'topic': CONF.compute_topic}
+        filters = {'topic': compute_rpcapi.RPC_TOPIC}
         services = self.host_api.service_get_all(context, filters=filters)
         hosts = set(serv['host'] for serv in services)
         seen_hosts = set()
@@ -111,18 +110,3 @@ class InstanceUsageAuditLogController(wsgi.Controller):
                     total_errors=total_errors,
                     overall_status=overall_status,
                     log=log)
-
-
-class InstanceUsageAuditLog(extensions.V21APIExtensionBase):
-    """Admin-only Task Log Monitoring."""
-    name = "OSInstanceUsageAuditLog"
-    alias = ALIAS
-    version = 1
-
-    def get_resources(self):
-        ext = extensions.ResourceExtension('os-instance_usage_audit_log',
-                                           InstanceUsageAuditLogController())
-        return [ext]
-
-    def get_controller_extensions(self):
-        return []

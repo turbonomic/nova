@@ -31,8 +31,6 @@ from nova import utils
 
 CONF = nova.conf.CONF
 
-ALIAS = "os-evacuate"
-
 
 class EvacuateController(wsgi.Controller):
     def __init__(self, *args, **kwargs):
@@ -74,7 +72,7 @@ class EvacuateController(wsgi.Controller):
     # backwards compatibility reasons.
     @extensions.expected_errors((400, 404, 409))
     @wsgi.action('evacuate')
-    @validation.schema(evacuate.evacuate, "2.1", "2.12")
+    @validation.schema(evacuate.evacuate, "2.0", "2.13")
     @validation.schema(evacuate.evacuate_v214, "2.14", "2.28")
     @validation.schema(evacuate.evacuate_v2_29, "2.29")
     def _evacuate(self, req, id, body):
@@ -108,7 +106,8 @@ class EvacuateController(wsgi.Controller):
         if host is not None:
             try:
                 self.host_api.service_get_by_compute_host(context, host)
-            except exception.ComputeHostNotFound:
+            except (exception.ComputeHostNotFound,
+                    exception.HostMappingNotFound):
                 msg = _("Compute host %s not found.") % host
                 raise exc.HTTPNotFound(explanation=msg)
 
@@ -132,19 +131,3 @@ class EvacuateController(wsgi.Controller):
             return {'adminPass': password}
         else:
             return None
-
-
-class Evacuate(extensions.V21APIExtensionBase):
-    """Enables server evacuation."""
-
-    name = "Evacuate"
-    alias = ALIAS
-    version = 1
-
-    def get_resources(self):
-        return []
-
-    def get_controller_extensions(self):
-        controller = EvacuateController()
-        extension = extensions.ControllerExtension(self, 'servers', controller)
-        return [extension]

@@ -64,7 +64,7 @@ class BuildRequestTestCase(test.NoDBTestCase):
             if key == 'instance':
                 objects.base.obj_equal_prims(expected, db_value)
                 continue
-            elif key == 'block_device_mappings':
+            elif key in ('block_device_mappings', 'tags'):
                 self.assertEqual(1, len(db_value))
                 # Can't compare list objects directly, just compare the single
                 # item they contain.
@@ -525,6 +525,13 @@ class BuildRequestListTestCase(test.NoDBTestCase):
             self.assertEqual(req.instance_uuid, req_list[i].instance_uuid)
             objects.base.obj_equal_prims(req.instance,
                                          req_list[i].instance)
+
+    def test_get_by_filters_marker_not_found(self):
+        self._create_req()
+        self.assertRaises(exception.MarkerNotFound,
+                          build_request.BuildRequestList.get_by_filters,
+                          self.context, {}, marker=uuidutils.generate_uuid(),
+                          sort_keys=['id'], sort_dirs=['asc'])
 
     def test_get_by_filters_limit(self):
         reqs = [self._create_req(),

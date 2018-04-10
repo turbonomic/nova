@@ -73,10 +73,9 @@ class ServerTagsTest(test.TestCase):
         mock_exists.return_value = True
         req = self._get_request(
             '/v2/fake/servers/%s/tags/%s' % (UUID, TAG1), 'GET')
-        context = req.environ["nova.context"]
 
         self.controller.show(req, UUID, TAG1)
-        mock_exists.assert_called_once_with(context, UUID, TAG1)
+        mock_exists.assert_called_once_with(mock.ANY, UUID, TAG1)
 
     @mock.patch('nova.db.instance_tag_get_by_instance_uuid')
     def test_index(self, mock_db_get_inst_tags):
@@ -84,24 +83,24 @@ class ServerTagsTest(test.TestCase):
         mock_db_get_inst_tags.return_value = fake_tags
 
         req = self._get_request('/v2/fake/servers/%s/tags' % UUID, 'GET')
-        context = req.environ["nova.context"]
 
         res = self.controller.index(req, UUID)
         self.assertEqual(TAGS, res.get('tags'))
-        mock_db_get_inst_tags.assert_called_once_with(context, UUID)
+        mock_db_get_inst_tags.assert_called_once_with(mock.ANY, UUID)
 
+    @mock.patch('nova.notifications.base.send_instance_update_notification')
     @mock.patch('nova.db.instance_tag_set')
-    def test_update_all(self, mock_db_set_inst_tags):
+    def test_update_all(self, mock_db_set_inst_tags, mock_notify):
         self.stub_out('nova.api.openstack.common.get_instance', return_server)
         fake_tags = [self._get_tag(tag) for tag in TAGS]
         mock_db_set_inst_tags.return_value = fake_tags
         req = self._get_request(
             '/v2/fake/servers/%s/tags' % UUID, 'PUT')
-        context = req.environ["nova.context"]
         res = self.controller.update_all(req, UUID, body={'tags': TAGS})
 
         self.assertEqual(TAGS, res['tags'])
-        mock_db_set_inst_tags.assert_called_once_with(context, UUID, TAGS)
+        mock_db_set_inst_tags.assert_called_once_with(mock.ANY, UUID, TAGS)
+        self.assertEqual(1, mock_notify.call_count)
 
     def test_update_all_too_many_tags(self):
         self.stub_out('nova.api.openstack.common.get_instance', return_server)
@@ -163,9 +162,11 @@ class ServerTagsTest(test.TestCase):
         self.assertRaises(exc.HTTPNotFound, self.controller.show,
                           req, UUID, TAG1)
 
+    @mock.patch('nova.notifications.base.send_instance_update_notification')
     @mock.patch('nova.db.instance_tag_add')
     @mock.patch('nova.db.instance_tag_get_by_instance_uuid')
-    def test_update(self, mock_db_get_inst_tags, mock_db_add_inst_tags):
+    def test_update(self, mock_db_get_inst_tags, mock_db_add_inst_tags,
+                    mock_notify):
         self.stub_out('nova.api.openstack.common.get_instance', return_server)
         mock_db_get_inst_tags.return_value = [self._get_tag(TAG1)]
         mock_db_add_inst_tags.return_value = self._get_tag(TAG2)
@@ -173,14 +174,14 @@ class ServerTagsTest(test.TestCase):
         url = '/v2/fake/servers/%s/tags/%s' % (UUID, TAG2)
         location = 'http://localhost' + url
         req = self._get_request(url, 'PUT')
-        context = req.environ["nova.context"]
         res = self.controller.update(req, UUID, TAG2, body=None)
 
         self.assertEqual(201, res.status_int)
         self.assertEqual(0, len(res.body))
         self.assertEqual(location, res.headers['Location'])
-        mock_db_add_inst_tags.assert_called_once_with(context, UUID, TAG2)
-        mock_db_get_inst_tags.assert_called_once_with(context, UUID)
+        mock_db_add_inst_tags.assert_called_once_with(mock.ANY, UUID, TAG2)
+        self.assertEqual(2, mock_db_get_inst_tags.call_count)
+        self.assertEqual(1, mock_notify.call_count)
 
     @mock.patch('nova.db.instance_tag_get_by_instance_uuid')
     def test_update_existing_tag(self, mock_db_get_inst_tags):
@@ -189,12 +190,11 @@ class ServerTagsTest(test.TestCase):
 
         req = self._get_request(
             '/v2/fake/servers/%s/tags/%s' % (UUID, TAG1), 'PUT')
-        context = req.environ["nova.context"]
         res = self.controller.update(req, UUID, TAG1, body=None)
 
         self.assertEqual(204, res.status_int)
         self.assertEqual(0, len(res.body))
-        mock_db_get_inst_tags.assert_called_once_with(context, UUID)
+        mock_db_get_inst_tags.assert_called_once_with(mock.ANY, UUID)
 
     @mock.patch('nova.db.instance_tag_get_by_instance_uuid')
     def test_update_tag_limit_exceed(self, mock_db_get_inst_tags):
@@ -237,14 +237,18 @@ class ServerTagsTest(test.TestCase):
         self.assertRaises(exc.HTTPConflict, self.controller.update, req, UUID,
                           TAG1, body=None)
 
+    @mock.patch('nova.db.instance_tag_get_by_instance_uuid')
+    @mock.patch('nova.notifications.base.send_instance_update_notification')
     @mock.patch('nova.db.instance_tag_delete')
-    def test_delete(self, mock_db_delete_inst_tags):
+    def test_delete(self, mock_db_delete_inst_tags, mock_notify,
+                    mock_db_get_inst_tags):
         self.stub_out('nova.api.openstack.common.get_instance', return_server)
         req = self._get_request(
             '/v2/fake/servers/%s/tags/%s' % (UUID, TAG2), 'DELETE')
-        context = req.environ["nova.context"]
         self.controller.delete(req, UUID, TAG2)
-        mock_db_delete_inst_tags.assert_called_once_with(context, UUID, TAG2)
+        mock_db_delete_inst_tags.assert_called_once_with(mock.ANY, UUID, TAG2)
+        mock_db_get_inst_tags.assert_called_once_with(mock.ANY, UUID)
+        self.assertEqual(1, mock_notify.call_count)
 
     @mock.patch('nova.db.instance_tag_delete')
     def test_delete_non_existing_tag(self, mock_db_delete_inst_tags):
@@ -269,13 +273,14 @@ class ServerTagsTest(test.TestCase):
         self.assertRaises(exc.HTTPConflict, self.controller.delete, req, UUID,
                           TAG1)
 
+    @mock.patch('nova.notifications.base.send_instance_update_notification')
     @mock.patch('nova.db.instance_tag_delete_all')
-    def test_delete_all(self, mock_db_delete_inst_tags):
+    def test_delete_all(self, mock_db_delete_inst_tags, mock_notify):
         self.stub_out('nova.api.openstack.common.get_instance', return_server)
         req = self._get_request('/v2/fake/servers/%s/tags' % UUID, 'DELETE')
-        context = req.environ["nova.context"]
         self.controller.delete_all(req, UUID)
-        mock_db_delete_inst_tags.assert_called_once_with(context, UUID)
+        mock_db_delete_inst_tags.assert_called_once_with(mock.ANY, UUID)
+        self.assertEqual(1, mock_notify.call_count)
 
     def test_delete_all_invalid_instance_state(self):
         self.stub_out('nova.api.openstack.common.get_instance',

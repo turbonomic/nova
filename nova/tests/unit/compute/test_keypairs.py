@@ -14,6 +14,7 @@
 #    under the License.
 """Tests for keypair API."""
 
+import mock
 from oslo_concurrency import processutils
 from oslo_config import cfg
 import six
@@ -29,7 +30,6 @@ from nova.tests.unit import fake_notifier
 from nova.tests.unit.objects import test_keypair
 
 CONF = cfg.CONF
-QUOTAS = quota.QUOTAS
 
 
 class KeypairAPITestCase(test_compute.BaseTestCase):
@@ -149,12 +149,10 @@ class CreateImportSharedTestMixIn(object):
         self.assertKeypairRaises(exception.KeyPairExists, msg,
                                  self.existing_key_name)
 
-    def test_quota_limit(self):
-        def fake_quotas_count(self, context, resource, *args, **kwargs):
-            return CONF.quota.key_pairs
-
-        self.stubs.Set(QUOTAS, "count", fake_quotas_count)
-
+    @mock.patch.object(quota.QUOTAS, 'count_as_dict',
+                       return_value={'user': {
+                                         'key_pairs': CONF.quota.key_pairs}})
+    def test_quota_limit(self, mock_count_as_dict):
         msg = "Maximum number of key pairs exceeded"
         self.assertKeypairRaises(exception.KeypairLimitExceeded, msg, 'foo')
 
@@ -162,11 +160,17 @@ class CreateImportSharedTestMixIn(object):
 class CreateKeypairTestCase(KeypairAPITestCase, CreateImportSharedTestMixIn):
     func_name = 'create_key_pair'
 
-    def _check_success(self):
+    @mock.patch('nova.compute.utils.notify_about_keypair_action')
+    def _check_success(self, mock_notify):
         keypair, private_key = self.keypair_api.create_key_pair(
             self.ctxt, self.ctxt.user_id, 'foo', key_type=self.keypair_type)
         self.assertEqual('foo', keypair['name'])
         self.assertEqual(self.keypair_type, keypair['type'])
+        mock_notify.assert_has_calls([
+            mock.call(context=self.ctxt, keypair=keypair,
+                      action='create', phase='start'),
+            mock.call(context=self.ctxt, keypair=keypair,
+                      action='create', phase='end')])
         self._check_notifications()
 
     def test_success_ssh(self):

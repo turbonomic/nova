@@ -20,23 +20,24 @@ It is used via a single directive in the .rst file
 
 """
 
-from sphinx.util.compat import Directive
 from docutils import nodes
+import importlib
+import pkgutil
+from sphinx.util.compat import Directive
 
+import nova.notifications.objects
 from nova.notifications.objects import base as notification
 from nova.objects import base
-# Make sure that all the notification classes are defined so the
-# registration mechanism can pick them up later.
-from nova.notifications.objects import exception
-from nova.notifications.objects import flavor
-from nova.notifications.objects import instance
-from nova.notifications.objects import service
 
 
 class VersionedNotificationDirective(Directive):
 
     SAMPLE_ROOT = 'doc/notification_samples/'
     TOGGLE_SCRIPT = """
+<!-- jQuery -->
+<script type="text/javascript" src="../_static/js/jquery-3.2.1.min.js">
+</script>
+
 <script>
 jQuery(document).ready(function(){
     jQuery('#%s-div').toggle('show');
@@ -51,7 +52,13 @@ jQuery(document).ready(function(){
         notifications = self._collect_notifications()
         return self._build_markup(notifications)
 
+    def _import_all_notification_packages(self):
+        map(lambda module: importlib.import_module(module),
+            ('nova.notifications.objects.' + name for _, name, _ in
+             pkgutil.iter_modules(nova.notifications.objects.__path__)))
+
     def _collect_notifications(self):
+        self._import_all_notification_packages()
         base.NovaObjectRegistry.register_notification_objects()
         notifications = []
         ovos = base.NovaObjectRegistry.obj_classes()

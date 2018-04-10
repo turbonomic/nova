@@ -85,10 +85,14 @@ class ServersSampleBase(api_sample_base.ApiSampleTestBaseV21):
 
 
 class ServersSampleJsonTest(ServersSampleBase):
+    # This controls whether or not we use the common server API sample
+    # for server post req/resp.
+    use_common_server_post = True
     microversion = None
 
     def test_servers_post(self):
-        return self._post_server()
+        return self._post_server(
+            use_common_server_api_samples=self.use_common_server_post)
 
     def test_servers_get(self):
         self.stub_out('nova.db.block_device_mapping_get_all_by_instance_uuids',
@@ -202,6 +206,36 @@ class ServersSampleJson242Test(ServersSampleBase):
         self._post_server(use_common_server_api_samples=False)
 
 
+class ServersSampleJson247Test(ServersSampleJsonTest):
+    microversion = '2.47'
+    scenarios = [('v2_47', {'api_major_version': 'v2.1'})]
+    use_common_server_post = False
+
+    def test_server_rebuild(self):
+        uuid = self._post_server()
+        image = fake.get_valid_image_id()
+        params = {
+            'uuid': image,
+            'name': 'foobar',
+            'pass': 'seekr3t',
+            'hostid': '[a-f0-9]+',
+            'access_ip_v4': '1.2.3.4',
+            'access_ip_v6': '80fe::',
+        }
+
+        resp = self._do_post('servers/%s/action' % uuid,
+                             'server-action-rebuild', params)
+        subs = params.copy()
+        del subs['uuid']
+        self._verify_response('server-action-rebuild-resp', subs, resp, 202)
+
+
+class ServersSampleJson252Test(ServersSampleJsonTest):
+    microversion = '2.52'
+    scenarios = [('v2_52', {'api_major_version': 'v2.1'})]
+    use_common_server_post = False
+
+
 class ServersUpdateSampleJsonTest(ServersSampleBase):
 
     def test_update_server(self):
@@ -215,6 +249,11 @@ class ServersUpdateSampleJsonTest(ServersSampleBase):
         self._verify_response('server-update-resp', subs, response, 200)
 
 
+class ServersUpdateSampleJson247Test(ServersUpdateSampleJsonTest):
+    microversion = '2.47'
+    scenarios = [('v2_47', {'api_major_version': 'v2.1'})]
+
+
 class ServerSortKeysJsonTests(ServersSampleBase):
     sample_dir = 'servers-sort'
 
@@ -225,8 +264,7 @@ class ServerSortKeysJsonTests(ServersSampleBase):
                               200)
 
 
-class ServersActionsJsonTest(ServersSampleBase):
-
+class _ServersActionsJsonTestMixin(object):
     def _test_server_action(self, uuid, action, req_tpl,
                             subs=None, resp_tpl=None, code=202):
         subs = subs or {}
@@ -240,6 +278,10 @@ class ServersActionsJsonTest(ServersSampleBase):
         else:
             self.assertEqual(code, response.status_code)
             self.assertEqual("", response.text)
+        return response
+
+
+class ServersActionsJsonTest(ServersSampleBase, _ServersActionsJsonTestMixin):
 
     def test_server_reboot_hard(self):
         uuid = self._post_server()
@@ -291,12 +333,6 @@ class ServersActionsJsonTest(ServersSampleBase):
                                  'server-action-confirm-resize',
                                  code=204)
 
-    def test_server_create_image(self):
-        uuid = self._post_server()
-        self._test_server_action(uuid, 'createImage',
-                                 'server-action-create-image',
-                                 {'name': 'foo-image'})
-
     def _wait_for_active_server(self, uuid):
         """Wait 10 seconds for the server to be ACTIVE, else fail.
 
@@ -343,7 +379,27 @@ class ServersActionsJsonTest(ServersSampleBase):
         self.stub_out('nova.network.api.API.associate_floating_ip',
                       lambda *a, **k: None)
         self._test_server_action(uuid, 'addFloatingIp',
-                                 'server-action-addfloatingip', subs)
+                                 'server-action-addfloatingip-req', subs)
+
+    def test_server_remove_floating_ip(self):
+        server_uuid = self._post_server()
+        self._wait_for_active_server(server_uuid)
+
+        subs = {
+            "address": "172.16.10.7"
+        }
+
+        self.stub_out('nova.network.api.API.get_floating_ip_by_address',
+                      lambda *a, **k: {'fixed_ip_id':
+                                       'a0c566f0-faab-406f-b77f-2b286dc6dd7e'})
+        self.stub_out(
+            'nova.network.api.API.get_instance_id_by_floating_address',
+            lambda *a, **k: server_uuid)
+        self.stub_out('nova.network.api.API.disassociate_floating_ip',
+                      lambda *a, **k: None)
+
+        self._test_server_action(server_uuid, 'removeFloatingIp',
+                                 'server-action-removefloatingip-req', subs)
 
 
 class ServersActionsJson219Test(ServersSampleBase):
@@ -368,6 +424,66 @@ class ServersActionsJson219Test(ServersSampleBase):
         subs = params.copy()
         del subs['uuid']
         self._verify_response('server-action-rebuild-resp', subs, resp, 202)
+
+
+class ServersActionsJson226Test(ServersSampleBase):
+    microversion = '2.26'
+    scenarios = [('v2_26', {'api_major_version': 'v2.1'})]
+
+    def test_server_rebuild(self):
+        uuid = self._post_server()
+        image = fake.get_valid_image_id()
+        params = {
+            'uuid': image,
+            'access_ip_v4': '1.2.3.4',
+            'access_ip_v6': '80fe::',
+            'disk_config': 'AUTO',
+            'hostid': '[a-f0-9]+',
+            'name': 'foobar',
+            'pass': 'seekr3t',
+            'preserve_ephemeral': 'false',
+            'description': 'description of foobar'
+        }
+
+        # Add 'tag1' and 'tag2' tags
+        self._do_put('servers/%s/tags/tag1' % uuid)
+        self._do_put('servers/%s/tags/tag2' % uuid)
+
+        # Rebuild Action
+        resp = self._do_post('servers/%s/action' % uuid,
+                             'server-action-rebuild', params)
+
+        subs = params.copy()
+        del subs['uuid']
+        self._verify_response('server-action-rebuild-resp', subs, resp, 202)
+
+
+class ServersCreateImageJsonTest(ServersSampleBase,
+                                 _ServersActionsJsonTestMixin):
+    """Tests the createImage server action API against 2.1."""
+    def test_server_create_image(self):
+        uuid = self._post_server()
+        resp = self._test_server_action(uuid, 'createImage',
+                                        'server-action-create-image',
+                                        {'name': 'foo-image'})
+        # we should have gotten a location header back
+        self.assertIn('location', resp.headers)
+        # we should not have gotten a body back
+        self.assertEqual(0, len(resp.content))
+
+
+class ServersCreateImageJsonTestv2_45(ServersCreateImageJsonTest):
+    """Tests the createImage server action API against 2.45."""
+    microversion = '2.45'
+    scenarios = [('v2_45', {'api_major_version': 'v2.1'})]
+
+    def test_server_create_image(self):
+        uuid = self._post_server()
+        resp = self._test_server_action(
+            uuid, 'createImage', 'server-action-create-image',
+            {'name': 'foo-image'}, 'server-action-create-image-resp')
+        # assert that no location header was returned
+        self.assertNotIn('location', resp.headers)
 
 
 class ServerStartStopJsonTest(ServersSampleBase):

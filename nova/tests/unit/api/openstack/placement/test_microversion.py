@@ -74,7 +74,7 @@ class TestMicroversionIntersection(test.NoDBTestCase):
     # if you add two different versions of method 'foobar' the
     # number only goes up by one if no other version foobar yet
     # exists. This operates as a simple sanity check.
-    TOTAL_VERSIONED_METHODS = 5
+    TOTAL_VERSIONED_METHODS = 15
 
     def test_methods_versioned(self):
         methods_data = microversion.VERSIONED_METHODS
@@ -156,3 +156,18 @@ class TestMicroversionUtility(test.NoDBTestCase):
         self.assertRaises(KeyError,
              microversion.raise_http_status_code_if_not_version,
              self.req, 999, '1.5')
+
+
+class MicroversionSequentialTest(test.NoDBTestCase):
+
+    def test_microversion_sequential(self):
+        for method_name, method_list in microversion.VERSIONED_METHODS.items():
+            previous_min_version = method_list[0][0]
+            for method in method_list[1:]:
+                previous_min_version = microversion.parse_version_string(
+                    '%s.%s' % (previous_min_version.major,
+                               previous_min_version.minor - 1))
+                self.assertEqual(previous_min_version, method[1],
+                    "The microversions aren't sequential in the mehtod %s" %
+                    method_name)
+                previous_min_version = method[0]

@@ -17,11 +17,9 @@
 
 from nova.api.openstack.compute.schemas import config_drive as \
                                                   schema_config_drive
-from nova.api.openstack import extensions
 from nova.api.openstack import wsgi
 from nova.policies import config_drive as cd_policies
 
-ALIAS = "os-config-drive"
 ATTRIBUTE_NAME = "config_drive"
 
 
@@ -54,25 +52,11 @@ class ConfigDriveController(wsgi.Controller):
             self._add_config_drive(req, servers)
 
 
-class ConfigDrive(extensions.V21APIExtensionBase):
-    """Config Drive Extension."""
+# NOTE(gmann): This function is not supposed to use 'body_deprecated_param'
+# parameter as this is placed to handle scheduler_hint extension for V2.1.
+def server_create(server_dict, create_kwargs, body_deprecated_param):
+    create_kwargs['config_drive'] = server_dict.get(ATTRIBUTE_NAME)
 
-    name = "ConfigDrive"
-    alias = ALIAS
-    version = 1
 
-    def get_controller_extensions(self):
-        controller = ConfigDriveController()
-        extension = extensions.ControllerExtension(self, 'servers', controller)
-        return [extension]
-
-    def get_resources(self):
-        return []
-
-    # NOTE(gmann): This function is not supposed to use 'body_deprecated_param'
-    # parameter as this is placed to handle scheduler_hint extension for V2.1.
-    def server_create(self, server_dict, create_kwargs, body_deprecated_param):
-        create_kwargs['config_drive'] = server_dict.get(ATTRIBUTE_NAME)
-
-    def get_server_create_schema(self, version):
-        return schema_config_drive.server_create
+def get_server_create_schema(version):
+    return schema_config_drive.server_create

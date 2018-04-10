@@ -16,7 +16,6 @@ from os_brick.initiator import connector
 from oslo_log import log as logging
 
 import nova.conf
-from nova.i18n import _LW
 from nova import utils
 from nova.virt.libvirt.volume import volume as libvirt_volume
 
@@ -37,7 +36,7 @@ class LibvirtISCSIVolumeDriver(libvirt_volume.LibvirtBaseVolumeDriver):
         self.connector = connector.InitiatorConnector.factory(
             'ISCSI', utils.get_root_helper(),
             use_multipath=CONF.libvirt.volume_use_multipath,
-            device_scan_attempts=CONF.libvirt.num_iscsi_scan_tries,
+            device_scan_attempts=CONF.libvirt.num_volume_scan_tries,
             transport=self._get_transport())
 
     def _get_transport(self):
@@ -57,7 +56,7 @@ class LibvirtISCSIVolumeDriver(libvirt_volume.LibvirtBaseVolumeDriver):
         conf.driver_io = "native"
         return conf
 
-    def connect_volume(self, connection_info, disk_info):
+    def connect_volume(self, connection_info, disk_info, instance):
         """Attach the volume to instance_name."""
 
         LOG.debug("Calling os-brick to attach iSCSI Volume")
@@ -66,16 +65,25 @@ class LibvirtISCSIVolumeDriver(libvirt_volume.LibvirtBaseVolumeDriver):
 
         connection_info['data']['device_path'] = device_info['path']
 
-    def disconnect_volume(self, connection_info, disk_dev):
+    def disconnect_volume(self, connection_info, disk_dev, instance):
         """Detach the volume from instance_name."""
 
         LOG.debug("calling os-brick to detach iSCSI Volume")
         try:
             self.connector.disconnect_volume(connection_info['data'], None)
         except os_brick_exception.VolumeDeviceNotFound as exc:
-            LOG.warning(_LW('Ignoring VolumeDeviceNotFound: %s'), exc)
+            LOG.warning('Ignoring VolumeDeviceNotFound: %s', exc)
             return
         LOG.debug("Disconnected iSCSI Volume %s", disk_dev)
 
         super(LibvirtISCSIVolumeDriver,
-              self).disconnect_volume(connection_info, disk_dev)
+              self).disconnect_volume(connection_info, disk_dev, instance)
+
+    def extend_volume(self, connection_info, instance):
+        """Extend the volume."""
+        LOG.debug("calling os-brick to extend iSCSI Volume", instance=instance)
+        new_size = self.connector.extend_volume(connection_info['data'])
+        LOG.debug("Extend iSCSI Volume %s; new_size=%s",
+                  connection_info['data']['device_path'],
+                  new_size, instance=instance)
+        return new_size

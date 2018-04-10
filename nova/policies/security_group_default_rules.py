@@ -19,16 +19,36 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-security-group-default-rules'
-POLICY_ROOT = 'os_compute_api:os-security-group-default-rules:%s'
 
 
 security_group_default_rules_policies = [
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'discoverable',
-        check_str=base.RULE_ANY),
-    policy.RuleDefault(
-        name=BASE_POLICY_NAME,
-        check_str=base.RULE_ADMIN_API),
+    policy.DocumentedRuleDefault(
+        BASE_POLICY_NAME,
+        base.RULE_ADMIN_API,
+        """List, show information for, create, or delete default security
+group rules.
+
+These APIs are only available with nova-network which is now deprecated.""",
+        [
+            {
+                'method': 'GET',
+                'path': '/os-security-group-default-rules'
+            },
+            {
+                'method': 'GET',
+                'path': '/os-security-group-default-rules'
+                        '/{security_group_default_rule_id}'
+            },
+            {
+                'method': 'POST',
+                'path': '/os-security-group-default-rules'
+            },
+            {
+                'method': 'DELETE',
+                'path': '/os-security-group-default-rules'
+                        '/{security_group_default_rule_id}'
+            }
+        ]),
 ]
 
 

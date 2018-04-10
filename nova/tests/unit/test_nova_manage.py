@@ -15,6 +15,7 @@
 
 import sys
 
+import ddt
 import fixtures
 import mock
 from oslo_db import exception as db_exc
@@ -36,6 +37,42 @@ from nova.tests.unit.objects import test_network
 from nova.tests import uuidsentinel
 
 CONF = conf.CONF
+
+
+class UtilitiesTestCase(test.NoDBTestCase):
+
+    def test_mask_passwd(self):
+        # try to trip up the regex match with extra : and @.
+        url1 = ("http://user:pass@domain.com:1234/something?"
+                "email=me@somewhere.com")
+        self.assertEqual(
+            ("http://user:****@domain.com:1234/something?"
+             "email=me@somewhere.com"),
+            manage.mask_passwd_in_url(url1))
+
+        # pretty standard kinds of urls that we expect, have different
+        # schemes. This ensures none of the parts get lost.
+        url2 = "mysql+pymysql://root:pass@127.0.0.1/nova_api?charset=utf8"
+        self.assertEqual(
+            "mysql+pymysql://root:****@127.0.0.1/nova_api?charset=utf8",
+            manage.mask_passwd_in_url(url2))
+
+        url3 = "rabbit://stackrabbit:pass@10.42.0.53:5672/"
+        self.assertEqual(
+            "rabbit://stackrabbit:****@10.42.0.53:5672/",
+            manage.mask_passwd_in_url(url3))
+
+        url4 = ("mysql+pymysql://nova:my_password@my_IP/nova_api?"
+                "charset=utf8&ssl_ca=/etc/nova/tls/mysql/ca-cert.pem"
+                "&ssl_cert=/etc/nova/tls/mysql/server-cert.pem"
+                "&ssl_key=/etc/nova/tls/mysql/server-key.pem")
+        url4_safe = ("mysql+pymysql://nova:****@my_IP/nova_api?"
+                "charset=utf8&ssl_ca=/etc/nova/tls/mysql/ca-cert.pem"
+                "&ssl_cert=/etc/nova/tls/mysql/server-cert.pem"
+                "&ssl_key=/etc/nova/tls/mysql/server-key.pem")
+        self.assertEqual(
+            url4_safe,
+            manage.mask_passwd_in_url(url4))
 
 
 class FloatingIpCommandsTestCase(test.NoDBTestCase):
@@ -353,33 +390,6 @@ class ProjectCommandsTestCase(test.TestCase):
     def test_quota_update_invalid_key(self):
         self.assertEqual(2, self.commands.quota('admin', 'volumes1', '10'))
 
-    def test_quota_usage_refresh_all_user_keys(self):
-        self.assertIsNone(self.commands.quota_usage_refresh(
-            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaab'))
-
-    def test_quota_usage_refresh_all_project_keys(self):
-        self.assertIsNone(self.commands.quota_usage_refresh(
-            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'))
-
-    def test_quota_usage_refresh_with_keys(self):
-        self.assertIsNone(self.commands.quota_usage_refresh(
-            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaab',
-            'ram'))
-
-    def test_quota_usage_refresh_invalid_user_key(self):
-        self.assertEqual(2, self.commands.quota_usage_refresh(
-            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaab',
-            'fixed_ip'))
-
-    def test_quota_usage_refresh_invalid_project_key(self):
-        self.assertEqual(2, self.commands.quota_usage_refresh(
-            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-            None,
-            'ram'))
-
 
 class DBCommandsTestCase(test.NoDBTestCase):
     def setUp(self):
@@ -552,10 +562,31 @@ Archiving.....stopped
             mock_target_cell.assert_called_once_with(ctxt, 'map')
 
             db_sync_calls = [
-                    mock.call(4, context=ctxt),
+                    mock.call(4, context=cell_ctxt),
                     mock.call(4)
             ]
             mock_db_sync.assert_has_calls(db_sync_calls)
+
+    @mock.patch.object(objects.CellMapping, 'get_by_uuid',
+                       side_effect=test.TestingException('invalid connection'))
+    def test_sync_cell0_unknown_error(self, mock_get_by_uuid):
+        """Asserts that a detailed error message is given when an unknown
+        error occurs trying to get the cell0 cell mapping.
+        """
+        self.commands.sync()
+        mock_get_by_uuid.assert_called_once_with(
+            test.MatchType(context.RequestContext),
+            objects.CellMapping.CELL0_UUID)
+        expected = """ERROR: Could not access cell0.
+Has the nova_api database been created?
+Has the nova_cell0 database been created?
+Has "nova-manage api_db sync" been run?
+Has "nova-manage cell_v2 map_cell0" been run?
+Is [api_database]/connection set in nova.conf?
+Is the cell0 database connection URL correct?
+Error: invalid connection
+"""
+        self.assertEqual(expected, self.output.getvalue())
 
     def _fake_db_command(self, migrations=None):
         if migrations is None:
@@ -809,6 +840,7 @@ class CellCommandsTestCase(test.NoDBTestCase):
         mock_db_cell_create.assert_called_once_with(ctxt, exp_values)
 
 
+@ddt.ddt
 class CellV2CommandsTestCase(test.NoDBTestCase):
     USES_DB_SELF = True
 
@@ -1138,6 +1170,30 @@ class CellV2CommandsTestCase(test.NoDBTestCase):
         self.assertEqual('fake://netloc/nova_cell0',
                          cell_mapping.database_connection)
 
+    @ddt.data('mysql+pymysql://nova:abcd0123:AB@controller/%s',
+              'mysql+pymysql://nova:abcd0123?AB@controller/%s',
+              'mysql+pymysql://nova:abcd0123@AB@controller/%s',
+              'mysql+pymysql://nova:abcd0123/AB@controller/%s',
+              'mysql+pymysql://test:abcd0123/AB@controller/%s?charset=utf8')
+    def test_map_cell0_default_database_special_characters(self,
+                                                           connection):
+        """Tests that a URL with special characters, like in the credentials,
+        is handled properly.
+        """
+        decoded_connection = connection % 'nova'
+        self.flags(connection=decoded_connection, group='database')
+        ctxt = context.RequestContext()
+        self.commands.map_cell0()
+        cell_mapping = objects.CellMapping.get_by_uuid(
+            ctxt, objects.CellMapping.CELL0_UUID)
+        self.assertEqual('cell0', cell_mapping.name)
+        self.assertEqual('none:///', cell_mapping.transport_url)
+        self.assertEqual(
+            connection % 'nova_cell0',
+            cell_mapping.database_connection)
+        # Delete the cell mapping for the next iteration.
+        cell_mapping.destroy()
+
     def _test_migrate_simple_command(self, cell0_sync_fail=False):
         ctxt = context.RequestContext()
         CONF.set_default('connection',
@@ -1268,6 +1324,8 @@ class CellV2CommandsTestCase(test.NoDBTestCase):
                                            transport_url='fake:///mq')
         cell_mapping.create()
 
+        mock_target_cell.return_value.__enter__.return_value = ctxt
+
         self.commands.discover_hosts(cell_uuid=cell_mapping.uuid)
 
         # Check that the host mappings were created
@@ -1343,10 +1401,12 @@ class CellV2CommandsTestCase(test.NoDBTestCase):
 
         compute_nodes = self._return_compute_nodes(ctxt, num=2)
         # Create the first compute node in cell1's db
-        with context.target_cell(ctxt, cell_mapping1):
+        with context.target_cell(ctxt, cell_mapping1) as cctxt:
+            compute_nodes[0]._context = cctxt
             compute_nodes[0].create()
         # Create the first compute node in cell2's db
-        with context.target_cell(ctxt, cell_mapping2):
+        with context.target_cell(ctxt, cell_mapping2) as cctxt:
+            compute_nodes[1]._context = cctxt
             compute_nodes[1].create()
 
         self.commands.discover_hosts(verbose=True)
@@ -1360,6 +1420,28 @@ class CellV2CommandsTestCase(test.NoDBTestCase):
             self.assertEqual('host%s' % i, host_mapping.host)
 
         mock_cell_mapping_get_by_uuid.assert_not_called()
+
+    @mock.patch('nova.objects.host_mapping.discover_hosts')
+    def test_discover_hosts_strict(self, mock_discover_hosts):
+        # Check for exit code 0 if unmapped hosts found
+        mock_discover_hosts.return_value = ['fake']
+        self.assertEqual(self.commands.discover_hosts(strict=True), 0)
+
+        # Check for exit code 1 if no unmapped hosts are found
+        mock_discover_hosts.return_value = []
+        self.assertEqual(self.commands.discover_hosts(strict=True), 1)
+
+        # Check the return when strict=False
+        self.assertIsNone(self.commands.discover_hosts())
+
+    @mock.patch('nova.objects.host_mapping.discover_hosts')
+    def test_discover_hosts_by_service(self, mock_discover_hosts):
+        mock_discover_hosts.return_value = ['fake']
+        ret = self.commands.discover_hosts(by_service=True, strict=True)
+        self.assertEqual(0, ret)
+        mock_discover_hosts.assert_called_once_with(mock.ANY, None,
+                                                    mock.ANY,
+                                                    True)
 
     def test_validate_transport_url_in_conf(self):
         from_conf = 'fake://user:pass@host:port/'
@@ -1438,13 +1520,30 @@ class CellV2CommandsTestCase(test.NoDBTestCase):
         self.assertIn('--database_connection', self.output.getvalue())
 
     def test_list_cells_no_cells_verbose_false(self):
+        ctxt = context.RequestContext()
+        # This uses fake uuids so the table can stay under 80 characeters.
+        cell_mapping0 = objects.CellMapping(
+            context=ctxt, uuid='00000000-0000-0000',
+            database_connection='fake://user1:pass1@host1/db0',
+            transport_url='none://user1:pass1@host1/',
+            name='cell0')
+        cell_mapping0.create()
+        cell_mapping1 = objects.CellMapping(
+            context=ctxt, uuid='9e36a3ed-3eb6-4327',
+            database_connection='fake://user1@host1/db0',
+            transport_url='none://user1@host1/vhost1',
+            name='cell1')
+        cell_mapping1.create()
         self.assertEqual(0, self.commands.list_cells())
         output = self.output.getvalue().strip()
         self.assertEqual('''\
-+------+------+
-| Name | UUID |
-+------+------+
-+------+------+''', output)
++-------+--------------------+---------------------------+-----------------------------+
+|  Name |        UUID        |       Transport URL       |     Database Connection     |
++-------+--------------------+---------------------------+-----------------------------+
+| cell0 | 00000000-0000-0000 |  none://user1:****@host1/ | fake://user1:****@host1/db0 |
+| cell1 | 9e36a3ed-3eb6-4327 | none://user1@host1/vhost1 |    fake://user1@host1/db0   |
++-------+--------------------+---------------------------+-----------------------------+''',  # noqa
+                         output)
 
     def test_list_cells_multiple_sorted_verbose_true(self):
         ctxt = context.RequestContext()
@@ -1484,12 +1583,6 @@ class CellV2CommandsTestCase(test.NoDBTestCase):
         self.assertEqual('Cell with uuid %s was not found.' % cell_uuid,
                          output)
 
-    def test_delete_cell_cell0(self):
-        cell_uuid = objects.CellMapping.CELL0_UUID
-        self.assertEqual(5, self.commands.delete_cell(cell_uuid))
-        output = self.output.getvalue().strip()
-        self.assertEqual('Cell 0 can not be deleted.', output)
-
     def test_delete_cell_host_mappings_exist(self):
         """Tests trying to delete a cell which has host mappings."""
         cell_uuid = uuidutils.generate_uuid()
@@ -1525,7 +1618,7 @@ class CellV2CommandsTestCase(test.NoDBTestCase):
         output = self.output.getvalue().strip()
         self.assertIn('There are existing instances mapped to cell', output)
 
-    def test_delete_cell_success(self):
+    def test_delete_cell_success_without_host_mappings(self):
         """Tests trying to delete an empty cell."""
         cell_uuid = uuidutils.generate_uuid()
         ctxt = context.get_admin_context()
@@ -1537,6 +1630,28 @@ class CellV2CommandsTestCase(test.NoDBTestCase):
         self.assertEqual(0, self.commands.delete_cell(cell_uuid))
         output = self.output.getvalue().strip()
         self.assertEqual('', output)
+
+    @mock.patch.object(objects.HostMapping, 'destroy')
+    @mock.patch.object(objects.CellMapping, 'destroy')
+    def test_delete_cell_success_with_host_mappings(self, mock_cell_destroy,
+                                                    mock_hm_destroy):
+        """Tests trying to delete a cell with host."""
+        ctxt = context.get_admin_context()
+        # create the cell mapping
+        cm = objects.CellMapping(
+            context=ctxt, uuid=uuidsentinel.cell1,
+            database_connection='fake:///db', transport_url='fake:///mq')
+        cm.create()
+        # create a host mapping in this cell
+        hm = objects.HostMapping(
+            context=ctxt, host='fake-host', cell_mapping=cm)
+        hm.create()
+        self.assertEqual(0, self.commands.delete_cell(uuidsentinel.cell1,
+                                                      force=True))
+        output = self.output.getvalue().strip()
+        self.assertEqual('', output)
+        mock_hm_destroy.assert_called_once_with()
+        mock_cell_destroy.assert_called_once_with()
 
     def test_update_cell_not_found(self):
         self.assertEqual(1, self.commands.update_cell(
@@ -1585,6 +1700,106 @@ class CellV2CommandsTestCase(test.NoDBTestCase):
         self.assertEqual(expected_db_connection, cm.database_connection)
         output = self.output.getvalue().strip()
         self.assertEqual('', output)
+
+    def test_delete_host_cell_not_found(self):
+        """Tests trying to delete a host but a specified cell is not found."""
+        self.assertEqual(1, self.commands.delete_host(uuidsentinel.cell1,
+                                                      'fake-host'))
+        output = self.output.getvalue().strip()
+        self.assertEqual(
+            'Cell with uuid %s was not found.' % uuidsentinel.cell1, output)
+
+    def test_delete_host_host_not_found(self):
+        """Tests trying to delete a host but the host is not found."""
+        ctxt = context.get_admin_context()
+        # create the cell mapping
+        cm = objects.CellMapping(
+            context=ctxt, uuid=uuidsentinel.cell1,
+            database_connection='fake:///db', transport_url='fake:///mq')
+        cm.create()
+        self.assertEqual(2, self.commands.delete_host(uuidsentinel.cell1,
+                                                      'fake-host'))
+        output = self.output.getvalue().strip()
+        self.assertEqual('The host fake-host was not found.', output)
+
+    def test_delete_host_host_not_in_cell(self):
+        """Tests trying to delete a host
+        but the host does not belongs to a specified cell.
+        """
+        ctxt = context.get_admin_context()
+        # create the cell mapping
+        cm1 = objects.CellMapping(
+            context=ctxt, uuid=uuidsentinel.cell1,
+            database_connection='fake:///db', transport_url='fake:///mq')
+        cm1.create()
+        cm2 = objects.CellMapping(
+            context=ctxt, uuid=uuidsentinel.cell2,
+            database_connection='fake:///db', transport_url='fake:///mq')
+        cm2.create()
+        # create a host mapping in another cell
+        hm = objects.HostMapping(
+            context=ctxt, host='fake-host', cell_mapping=cm2)
+        hm.create()
+        self.assertEqual(3, self.commands.delete_host(uuidsentinel.cell1,
+                                                      'fake-host'))
+        output = self.output.getvalue().strip()
+        self.assertEqual(('The host fake-host was not found in the cell %s.' %
+                          uuidsentinel.cell1), output)
+
+    @mock.patch.object(objects.InstanceList, 'get_by_host')
+    @mock.patch.object(objects.ComputeNodeList, 'get_all_by_host')
+    def test_delete_host_instances_exist(self, mock_get_cn, mock_get_by_host):
+        """Tests trying to delete a host but the host has instances."""
+        ctxt = context.get_admin_context()
+        # create the cell mapping
+        cm1 = objects.CellMapping(
+            context=ctxt, uuid=uuidsentinel.cell1,
+            database_connection='fake:///db', transport_url='fake:///mq')
+        cm1.create()
+        # create a host mapping in the cell
+        hm = objects.HostMapping(
+            context=ctxt, host='fake-host', cell_mapping=cm1)
+        hm.create()
+        mock_get_by_host.return_value = [objects.Instance(
+            ctxt, uuid=uuidsentinel.instance)]
+        mock_get_cn.return_value = []
+        self.assertEqual(4, self.commands.delete_host(uuidsentinel.cell1,
+                                                      'fake-host'))
+        output = self.output.getvalue().strip()
+        self.assertEqual('There are instances on the host fake-host.', output)
+        mock_get_by_host.assert_called_once_with(
+            test.MatchType(context.RequestContext), 'fake-host')
+
+    @mock.patch.object(objects.InstanceList, 'get_by_host',
+                       return_value=[])
+    @mock.patch.object(objects.HostMapping, 'destroy')
+    @mock.patch.object(objects.ComputeNodeList, 'get_all_by_host')
+    def test_delete_host_success(self, mock_get_cn, mock_destroy,
+                                 mock_get_by_host):
+        """Tests trying to delete a host that has not instances."""
+        ctxt = context.get_admin_context()
+        # create the cell mapping
+        cm1 = objects.CellMapping(
+            context=ctxt, uuid=uuidsentinel.cell1,
+            database_connection='fake:///db', transport_url='fake:///mq')
+        cm1.create()
+        # create a host mapping in the cell
+        hm = objects.HostMapping(
+            context=ctxt, host='fake-host', cell_mapping=cm1)
+        hm.create()
+
+        mock_get_cn.return_value = [mock.MagicMock(), mock.MagicMock()]
+
+        self.assertEqual(0, self.commands.delete_host(uuidsentinel.cell1,
+                                                      'fake-host'))
+        output = self.output.getvalue().strip()
+        self.assertEqual('', output)
+        mock_get_by_host.assert_called_once_with(
+            test.MatchType(context.RequestContext), 'fake-host')
+        mock_destroy.assert_called_once_with()
+        for node in mock_get_cn.return_value:
+            self.assertEqual(0, node.mapped)
+            node.save.assert_called_once_with()
 
 
 class TestNovaManageMain(test.NoDBTestCase):

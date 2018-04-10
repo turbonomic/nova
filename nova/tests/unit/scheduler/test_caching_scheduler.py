@@ -49,7 +49,8 @@ class CachingSchedulerTestCase(test_scheduler.SchedulerTestCase):
     def test_get_all_host_states_returns_cached_value(self, mock_up_hosts):
         self.driver.all_host_states = {uuids.cell: []}
 
-        self.driver._get_all_host_states(self.context, None)
+        self.driver._get_all_host_states(self.context, None,
+            mock.sentinel.provider_uuids)
 
         self.assertFalse(mock_up_hosts.called)
         self.assertEqual({uuids.cell: []}, self.driver.all_host_states)
@@ -60,7 +61,8 @@ class CachingSchedulerTestCase(test_scheduler.SchedulerTestCase):
         host_state = self._get_fake_host_state()
         mock_up_hosts.return_value = {uuids.cell: [host_state]}
 
-        result = self.driver._get_all_host_states(self.context, None)
+        result = self.driver._get_all_host_states(self.context, None,
+            mock.sentinel.provider_uuids)
 
         self.assertTrue(mock_up_hosts.called)
         self.assertEqual({uuids.cell: [host_state]},
@@ -84,7 +86,8 @@ class CachingSchedulerTestCase(test_scheduler.SchedulerTestCase):
 
         self.assertRaises(exception.NoValidHost,
                 self.driver.select_destinations,
-                self.context, spec_obj)
+                self.context, spec_obj, [spec_obj.instance_uuid],
+                {}, {})
 
     @mock.patch('nova.db.instance_extra_get_by_instance_uuid',
                 return_value={'numa_topology': None,
@@ -97,11 +100,17 @@ class CachingSchedulerTestCase(test_scheduler.SchedulerTestCase):
         result = self._test_select_destinations(spec_obj)
 
         self.assertEqual(1, len(result))
-        self.assertEqual(result[0]["host"], fake_host.host)
+        self.assertEqual(result[0].host, fake_host.host)
 
     def _test_select_destinations(self, spec_obj):
+        provider_summaries = {}
+        for cell_hosts in self.driver.all_host_states.values():
+            for hs in cell_hosts:
+                provider_summaries[hs.uuid] = hs
+
         return self.driver.select_destinations(
-                self.context, spec_obj)
+                self.context, spec_obj, [spec_obj.instance_uuid], {},
+                provider_summaries)
 
     def _get_fake_request_spec(self):
         # NOTE(sbauza): Prevent to stub the Flavor.get_by_id call just by
@@ -140,6 +149,7 @@ class CachingSchedulerTestCase(test_scheduler.SchedulerTestCase):
             'host_%s' % index,
             'node_%s' % index,
             uuids.cell)
+        host_state.uuid = getattr(uuids, 'host_%s' % index)
         host_state.free_ram_mb = 50000
         host_state.total_usable_ram_mb = 50000
         host_state.free_disk_mb = 4096
@@ -170,13 +180,14 @@ class CachingSchedulerTestCase(test_scheduler.SchedulerTestCase):
             host_state = self._get_fake_host_state(x)
             host_states.append(host_state)
         self.driver.all_host_states = {uuids.cell: host_states}
+        provider_summaries = {hs.uuid: hs for hs in host_states}
 
         def run_test():
             a = timeutils.utcnow()
 
             for x in range(requests):
-                self.driver.select_destinations(
-                    self.context, spec_obj)
+                self.driver.select_destinations(self.context, spec_obj,
+                        [spec_obj.instance_uuid], {}, provider_summaries)
 
             b = timeutils.utcnow()
             c = b - a
@@ -222,8 +233,13 @@ class CachingSchedulerTestCase(test_scheduler.SchedulerTestCase):
             uuids.cell1: host_states_cell1,
             uuids.cell2: host_states_cell2,
         }
-        d = self.driver.select_destinations(self.context, spec_obj)
-        self.assertIn(d[0]['host'], [hs.host for hs in host_states_cell2])
+        provider_summaries = {
+            cn.uuid: cn for cn in host_states_cell1 + host_states_cell2
+        }
+
+        d = self.driver.select_destinations(self.context, spec_obj,
+                [spec_obj.instance_uuid], {}, provider_summaries)
+        self.assertIn(d[0].host, [hs.host for hs in host_states_cell2])
 
 
 if __name__ == '__main__':

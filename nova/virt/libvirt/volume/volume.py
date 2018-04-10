@@ -21,8 +21,6 @@ from oslo_log import log as logging
 
 import nova.conf
 from nova import exception
-from nova.i18n import _LE
-from nova.i18n import _LW
 from nova import profiler
 from nova.virt.libvirt import config as vconfig
 import nova.virt.libvirt.driver
@@ -76,8 +74,8 @@ class LibvirtBaseVolumeDriver(object):
                         new_key = 'disk_' + k
                         setattr(conf, new_key, v)
             else:
-                LOG.warning(_LW('Unknown content in connection_info/'
-                             'qos_specs: %s'), specs)
+                LOG.warning('Unknown content in connection_info/'
+                            'qos_specs: %s', specs)
 
         # Extract access_mode control parameters
         if 'access_mode' in data and data['access_mode']:
@@ -85,8 +83,8 @@ class LibvirtBaseVolumeDriver(object):
             if access_mode in ('ro', 'rw'):
                 conf.readonly = access_mode == 'ro'
             else:
-                LOG.error(_LE('Unknown content in '
-                              'connection_info/access_mode: %s'),
+                LOG.error('Unknown content in '
+                          'connection_info/access_mode: %s',
                           access_mode)
                 raise exception.InvalidVolumeAccessMode(
                     access_mode=access_mode)
@@ -95,15 +93,30 @@ class LibvirtBaseVolumeDriver(object):
         if data.get('discard', False) is True:
             conf.driver_discard = 'unmap'
 
+        if disk_info['bus'] == 'scsi':
+            # The driver is responsible to create the SCSI controller
+            # at index 0.
+            conf.device_addr = vconfig.LibvirtConfigGuestDeviceAddressDrive()
+            conf.device_addr.controller = 0
+            if 'unit' in disk_info:
+                # In order to allow up to 256 disks handled by one
+                # virtio-scsi controller, the device addr should be
+                # specified.
+                conf.device_addr.unit = disk_info['unit']
+
         return conf
 
-    def connect_volume(self, connection_info, disk_info):
+    def connect_volume(self, connection_info, disk_info, instance):
         """Connect the volume."""
         pass
 
-    def disconnect_volume(self, connection_info, disk_dev):
+    def disconnect_volume(self, connection_info, disk_dev, instance):
         """Disconnect the volume."""
         pass
+
+    def extend_volume(self, connection_info, instance):
+        """Extend the volume."""
+        raise NotImplementedError()
 
 
 class LibvirtVolumeDriver(LibvirtBaseVolumeDriver):

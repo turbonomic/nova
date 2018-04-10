@@ -22,7 +22,7 @@ POLICY_ROOT = 'os_compute_api:os-server-tags:%s'
 
 
 server_tags_policies = [
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         POLICY_ROOT % 'delete_all',
         base.RULE_ADMIN_OR_OWNER,
         "Delete all the server tags",
@@ -32,7 +32,7 @@ server_tags_policies = [
                 'path': '/servers/{server_id}/tags'
             }
         ]),
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         POLICY_ROOT % 'index',
         base.RULE_ADMIN_OR_OWNER,
         "List all tags for given server",
@@ -42,7 +42,7 @@ server_tags_policies = [
                 'path': '/servers/{server_id}/tags'
             }
         ]),
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         POLICY_ROOT % 'update_all',
         base.RULE_ADMIN_OR_OWNER,
         "Replace all tags on specified server with the new set of tags.",
@@ -53,7 +53,7 @@ server_tags_policies = [
 
             }
         ]),
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         POLICY_ROOT % 'delete',
         base.RULE_ADMIN_OR_OWNER,
         "Delete a single tag from the specified server",
@@ -64,7 +64,7 @@ server_tags_policies = [
             }
         ]
     ),
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         POLICY_ROOT % 'update',
         base.RULE_ADMIN_OR_OWNER,
         "Add a single tag to the server if server has no specified tag",
@@ -75,7 +75,7 @@ server_tags_policies = [
             }
         ]
     ),
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         POLICY_ROOT % 'show',
         base.RULE_ADMIN_OR_OWNER,
         "Check tag existence on the server.",
@@ -86,9 +86,6 @@ server_tags_policies = [
             }
         ]
     ),
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'discoverable',
-        check_str=base.RULE_ANY)
 ]
 
 

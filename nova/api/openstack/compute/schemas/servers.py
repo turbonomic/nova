@@ -16,7 +16,7 @@ import copy
 
 from nova.api.validation import parameter_types
 from nova.api.validation.parameter_types import multi_params
-
+from nova.objects import instance
 
 base_create = {
     'type': 'object',
@@ -129,6 +129,16 @@ base_create_v242['properties']['server']['properties']['networks'] = {
     ]}
 
 
+# 2.52 builds on 2.42 and makes the following changes:
+# Allowing adding tags to instances when booting
+base_create_v252 = copy.deepcopy(base_create_v242)
+base_create_v252['properties']['server']['properties']['tags'] = {
+    "type": "array",
+    "items": parameter_types.tag,
+    "maxItems": instance.MAX_TAG_COUNT
+}
+
+
 base_update = {
     'type': 'object',
     'properties': {
@@ -189,7 +199,7 @@ base_rebuild_v219 = copy.deepcopy(base_rebuild)
 base_rebuild_v219['properties']['rebuild'][
     'properties']['description'] = parameter_types.description
 
-base_resize = {
+resize = {
     'type': 'object',
     'properties': {
         'resize': {
@@ -236,6 +246,7 @@ reboot = {
             'type': 'object',
             'properties': {
                 'type': {
+                    'type': 'string',
                     'enum': ['HARD', 'Hard', 'hard', 'SOFT', 'Soft', 'soft']
                 }
             },

@@ -49,11 +49,33 @@ class LiveMigrationTask(base.TaskBase):
         self._check_host_is_up(self.source)
 
         if not self.destination:
+            # Either no host was specified in the API request and the user
+            # wants the scheduler to pick a destination host, or a host was
+            # specified but is not forcing it, so they want the scheduler
+            # filters to run on the specified host, like a scheduler hint.
             self.destination = self._find_destination()
             self.migration.dest_compute = self.destination
             self.migration.save()
         else:
-            self._check_requested_destination()
+            # This is the case that the user specified the 'force' flag when
+            # live migrating with a specific destination host so the scheduler
+            # is bypassed. There are still some minimal checks performed here
+            # though.
+            source_node, dest_node = self._check_requested_destination()
+            # Now that we're semi-confident in the force specified host, we
+            # need to copy the source compute node allocations in Placement
+            # to the destination compute node. Normally select_destinations()
+            # in the scheduler would do this for us, but when forcing the
+            # target host we don't call the scheduler.
+            # TODO(mriedem): In Queens, call select_destinations() with a
+            # skip_filters=True flag so the scheduler does the work of claiming
+            # resources on the destination in Placement but still bypass the
+            # scheduler filters, which honors the 'force' flag in the API.
+            # This raises NoValidHost which will be handled in
+            # ComputeTaskManager.
+            scheduler_utils.claim_resources_on_destination(
+                self.scheduler_client.reportclient, self.instance,
+                source_node, dest_node)
 
         # TODO(johngarbutt) need to move complexity out of compute manager
         # TODO(johngarbutt) disk_over_commit?
@@ -89,11 +111,27 @@ class LiveMigrationTask(base.TaskBase):
             raise exception.ComputeServiceUnavailable(host=host)
 
     def _check_requested_destination(self):
+        """Performs basic pre-live migration checks for the forced host.
+
+        :returns: tuple of (source ComputeNode, destination ComputeNode)
+        """
         self._check_destination_is_not_source()
         self._check_host_is_up(self.destination)
         self._check_destination_has_enough_memory()
-        self._check_compatible_with_source_hypervisor(self.destination)
+        source_node, dest_node = self._check_compatible_with_source_hypervisor(
+            self.destination)
         self._call_livem_checks_on_host(self.destination)
+        # Make sure the forced destination host is in the same cell that the
+        # instance currently lives in.
+        # NOTE(mriedem): This can go away if/when the forced destination host
+        # case calls select_destinations.
+        source_cell_mapping = self._get_source_cell_mapping()
+        dest_cell_mapping = self._get_destination_cell_mapping()
+        if source_cell_mapping.uuid != dest_cell_mapping.uuid:
+            raise exception.MigrationPreCheckError(
+                reason=(_('Unable to force live migrate instance %s '
+                          'across cells.') % self.instance.uuid))
+        return source_node, dest_node
 
     def _check_destination_is_not_source(self):
         if self.destination == self.source:
@@ -101,6 +139,11 @@ class LiveMigrationTask(base.TaskBase):
                     instance_id=self.instance.uuid, host=self.destination)
 
     def _check_destination_has_enough_memory(self):
+        # TODO(mriedem): This method can be removed when the forced host
+        # scenario is calling select_destinations() in the scheduler because
+        # Placement will be used to filter allocation candidates by MEMORY_MB.
+        # We likely can't remove it until the CachingScheduler is gone though
+        # since the CachingScheduler does not use Placement.
         compute = self._get_compute_info(self.destination)
         free_ram_mb = compute.free_ram_mb
         total_ram_mb = compute.memory_mb
@@ -139,6 +182,7 @@ class LiveMigrationTask(base.TaskBase):
         destination_version = destination_info.hypervisor_version
         if source_version > destination_version:
             raise exception.DestinationHypervisorTooOld()
+        return source_info, destination_info
 
     def _call_livem_checks_on_host(self, destination):
         try:
@@ -150,17 +194,42 @@ class LiveMigrationTask(base.TaskBase):
                     "%s") % destination
             raise exception.MigrationPreCheckError(msg)
 
+    def _get_source_cell_mapping(self):
+        """Returns the CellMapping for the cell in which the instance lives
+
+        :returns: nova.objects.CellMapping record for the cell where
+            the instance currently lives.
+        :raises: MigrationPreCheckError - in case a mapping is not found
+        """
+        try:
+            return objects.InstanceMapping.get_by_instance_uuid(
+                self.context, self.instance.uuid).cell_mapping
+        except exception.InstanceMappingNotFound:
+            raise exception.MigrationPreCheckError(
+                reason=(_('Unable to determine in which cell '
+                          'instance %s lives.') % self.instance.uuid))
+
+    def _get_destination_cell_mapping(self):
+        """Returns the CellMapping for the destination host
+
+        :returns: nova.objects.CellMapping record for the cell where
+            the destination host is mapped.
+        :raises: MigrationPreCheckError - in case a mapping is not found
+        """
+        try:
+            return objects.HostMapping.get_by_host(
+                self.context, self.destination).cell_mapping
+        except exception.HostMappingNotFound:
+            raise exception.MigrationPreCheckError(
+                reason=(_('Unable to determine in which cell '
+                          'destination host %s lives.') % self.destination))
+
     def _find_destination(self):
         # TODO(johngarbutt) this retry loop should be shared
         attempted_hosts = [self.source]
         image = utils.get_image_from_system_metadata(
             self.instance.system_metadata)
         filter_properties = {'ignore_hosts': attempted_hosts}
-        # TODO(sbauza): Remove that once setup_instance_group() accepts a
-        # RequestSpec object
-        request_spec = {'instance_properties': {'uuid': self.instance.uuid}}
-        scheduler_utils.setup_instance_group(self.context, request_spec,
-                                                 filter_properties)
         if not self.request_spec:
             # NOTE(sbauza): We were unable to find an original RequestSpec
             # object - probably because the instance is old.
@@ -177,14 +246,31 @@ class LiveMigrationTask(base.TaskBase):
             # if we want to make sure that the next destination
             # is not forced to be the original host
             request_spec.reset_forced_destinations()
+        scheduler_utils.setup_instance_group(self.context, request_spec)
 
+        # We currently only support live migrating to hosts in the same
+        # cell that the instance lives in, so we need to tell the scheduler
+        # to limit the applicable hosts based on cell.
+        cell_mapping = self._get_source_cell_mapping()
+        LOG.debug('Requesting cell %(cell)s while live migrating',
+                  {'cell': cell_mapping.identity},
+                  instance=self.instance)
+        if ('requested_destination' in request_spec and
+                request_spec.requested_destination):
+            request_spec.requested_destination.cell = cell_mapping
+        else:
+            request_spec.requested_destination = objects.Destination(
+                cell=cell_mapping)
+
+        request_spec.ensure_project_id(self.instance)
         host = None
         while host is None:
             self._check_not_over_max_retries(attempted_hosts)
             request_spec.ignore_hosts = attempted_hosts
             try:
-                host = self.scheduler_client.select_destinations(self.context,
-                                request_spec)[0]['host']
+                hoststate = self.scheduler_client.select_destinations(
+                    self.context, request_spec, [self.instance.uuid])[0]
+                host = hoststate['host']
             except messaging.RemoteError as ex:
                 # TODO(ShaoHe Feng) There maybe multi-scheduler, and the
                 # scheduling algorithm is R-R, we can let other scheduler try.
@@ -200,8 +286,46 @@ class LiveMigrationTask(base.TaskBase):
                 LOG.debug("Skipping host: %(host)s because: %(e)s",
                     {"host": host, "e": e})
                 attempted_hosts.append(host)
+                # The scheduler would have created allocations against the
+                # selected destination host in Placement, so we need to remove
+                # those before moving on.
+                self._remove_host_allocations(host, hoststate['nodename'])
                 host = None
         return host
+
+    def _remove_host_allocations(self, host, node):
+        """Removes instance allocations against the given host from Placement
+
+        :param host: The name of the host.
+        :param node: The name of the node.
+        """
+        # Get the compute node object since we need the UUID.
+        # TODO(mriedem): If the result of select_destinations eventually
+        # returns the compute node uuid, we wouldn't need to look it
+        # up via host/node and we can save some time.
+        try:
+            compute_node = objects.ComputeNode.get_by_host_and_nodename(
+                self.context, host, node)
+        except exception.ComputeHostNotFound:
+            # This shouldn't happen, but we're being careful.
+            LOG.info('Unable to remove instance allocations from host %s '
+                     'and node %s since it was not found.', host, node,
+                     instance=self.instance)
+            return
+
+        # Calculate the resource class amounts to subtract from the allocations
+        # on the node based on the instance flavor.
+        resources = scheduler_utils.resources_from_flavor(
+            self.instance, self.instance.flavor)
+
+        # Now remove the allocations for our instance against that node.
+        # Note that this does not remove allocations against any other node
+        # or shared resource provider, it's just undoing what the scheduler
+        # allocated for the given (destination) node.
+        self.scheduler_client.reportclient.\
+            remove_provider_from_instance_allocation(
+                self.instance.uuid, compute_node.uuid, self.instance.user_id,
+                self.instance.project_id, resources)
 
     def _check_not_over_max_retries(self, attempted_hosts):
         if CONF.migrate_max_retries == -1:

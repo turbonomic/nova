@@ -81,7 +81,6 @@ tests:
       $.generation: 0
       $.links[?rel = "self"].href: /resource_providers/$ENVIRON['RP_UUID']
       $.links[?rel = "inventories"].href: /resource_providers/$ENVIRON['RP_UUID']/inventories
-      $.links[?rel = "aggregates"].href: /resource_providers/$ENVIRON['RP_UUID']/aggregates
       $.links[?rel = "usages"].href: /resource_providers/$ENVIRON['RP_UUID']/usages
 
 - name: get resource provider works with no accept
@@ -108,7 +107,6 @@ tests:
       $.resource_providers[0].generation: 0
       $.resource_providers[0].links[?rel = "self"].href: /resource_providers/$ENVIRON['RP_UUID']
       $.resource_providers[0].links[?rel = "inventories"].href: /resource_providers/$ENVIRON['RP_UUID']/inventories
-      $.resource_providers[0].links[?rel = "aggregates"].href: /resource_providers/$ENVIRON['RP_UUID']/aggregates
       $.resource_providers[0].links[?rel = "usages"].href: /resource_providers/$ENVIRON['RP_UUID']/usages
 
 - name: filter out all resource providers by name
@@ -129,7 +127,6 @@ tests:
       $.resource_providers[0].name: $ENVIRON['RP_NAME']
       $.resource_providers[0].links[?rel = "self"].href: /resource_providers/$ENVIRON['RP_UUID']
       $.resource_providers[0].links[?rel = "inventories"].href: /resource_providers/$ENVIRON['RP_UUID']/inventories
-      $.resource_providers[0].links[?rel = "aggregates"].href: /resource_providers/$ENVIRON['RP_UUID']/aggregates
       $.resource_providers[0].links[?rel = "usages"].href: /resource_providers/$ENVIRON['RP_UUID']/usages
 
 - name: list resource providers filtering by invalid uuid
@@ -156,7 +153,6 @@ tests:
       $.resource_providers[0].name: $ENVIRON['RP_NAME']
       $.resource_providers[0].links[?rel = "self"].href: /resource_providers/$ENVIRON['RP_UUID']
       $.resource_providers[0].links[?rel = "inventories"].href: /resource_providers/$ENVIRON['RP_UUID']/inventories
-      $.resource_providers[0].links[?rel = "aggregates"].href: /resource_providers/$ENVIRON['RP_UUID']/aggregates
       $.resource_providers[0].links[?rel = "usages"].href: /resource_providers/$ENVIRON['RP_UUID']/usages
 
 - name: update a resource provider

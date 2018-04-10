@@ -20,71 +20,55 @@ from webob import exc
 from nova.api.openstack import api_version_request
 from nova.api.openstack.compute.schemas import block_device_mapping as \
                                                   schema_block_device_mapping
-from nova.api.openstack import extensions
 from nova import block_device
 from nova import exception
 from nova.i18n import _
 
-ALIAS = "os-block-device-mapping"
 ATTRIBUTE_NAME = "block_device_mapping_v2"
 LEGACY_ATTRIBUTE_NAME = "block_device_mapping"
 
 
-class BlockDeviceMapping(extensions.V21APIExtensionBase):
-    """Block device mapping boot support."""
+# NOTE(gmann): This function is not supposed to use 'body_deprecated_param'
+# parameter as this is placed to handle scheduler_hint extension for V2.1.
+def server_create(server_dict, create_kwargs, body_deprecated_param):
 
-    name = "BlockDeviceMapping"
-    alias = ALIAS
-    version = 1
+    # Have to check whether --image is given, see bug 1433609
+    image_href = server_dict.get('imageRef')
+    image_uuid_specified = image_href is not None
 
-    def get_resources(self):
-        return []
+    bdm = server_dict.get(ATTRIBUTE_NAME, [])
+    legacy_bdm = server_dict.get(LEGACY_ATTRIBUTE_NAME, [])
 
-    def get_controller_extensions(self):
-        return []
+    if bdm and legacy_bdm:
+        expl = _('Using different block_device_mapping syntaxes '
+                 'is not allowed in the same request.')
+        raise exc.HTTPBadRequest(explanation=expl)
 
-    # use nova.api.extensions.server.extensions entry point to modify
-    # server create kwargs
-    # NOTE(gmann): This function is not supposed to use 'body_deprecated_param'
-    # parameter as this is placed to handle scheduler_hint extension for V2.1.
-    def server_create(self, server_dict, create_kwargs, body_deprecated_param):
+    try:
+        block_device_mapping = [
+            block_device.BlockDeviceDict.from_api(bdm_dict,
+                image_uuid_specified)
+            for bdm_dict in bdm]
+    except exception.InvalidBDMFormat as e:
+        raise exc.HTTPBadRequest(explanation=e.format_message())
 
-        # Have to check whether --image is given, see bug 1433609
-        image_href = server_dict.get('imageRef')
-        image_uuid_specified = image_href is not None
+    if block_device_mapping:
+        create_kwargs['block_device_mapping'] = block_device_mapping
+        # Unset the legacy_bdm flag if we got a block device mapping.
+        create_kwargs['legacy_bdm'] = False
 
-        bdm = server_dict.get(ATTRIBUTE_NAME, [])
-        legacy_bdm = server_dict.get(LEGACY_ATTRIBUTE_NAME, [])
 
-        if bdm and legacy_bdm:
-            expl = _('Using different block_device_mapping syntaxes '
-                     'is not allowed in the same request.')
-            raise exc.HTTPBadRequest(explanation=expl)
+def get_server_create_schema(version):
+    request_version = api_version_request.APIVersionRequest(version)
+    version_242 = api_version_request.APIVersionRequest('2.42')
 
-        try:
-            block_device_mapping = [
-                block_device.BlockDeviceDict.from_api(bdm_dict,
-                    image_uuid_specified)
-                for bdm_dict in bdm]
-        except exception.InvalidBDMFormat as e:
-            raise exc.HTTPBadRequest(explanation=e.format_message())
-
-        if block_device_mapping:
-            create_kwargs['block_device_mapping'] = block_device_mapping
-            # Unset the legacy_bdm flag if we got a block device mapping.
-            create_kwargs['legacy_bdm'] = False
-
-    def get_server_create_schema(self, version):
-        request_version = api_version_request.APIVersionRequest(version)
-        version_242 = api_version_request.APIVersionRequest('2.42')
-
-        # NOTE(artom) the following conditional was merged as
-        # "if version == '2.32'" The intent all along was to check whether
-        # version was greater than or equal to 2.32. In other words, we wanted
-        # to support tags in versions 2.32 and up, but ended up supporting them
-        # in version 2.32 only. Since we need a new microversion to add request
-        # body attributes, tags have been re-added in version 2.42.
-        if version == '2.32' or request_version >= version_242:
-            return schema_block_device_mapping.server_create_with_tags
-        else:
-            return schema_block_device_mapping.server_create
+    # NOTE(artom) the following conditional was merged as
+    # "if version == '2.32'" The intent all along was to check whether
+    # version was greater than or equal to 2.32. In other words, we wanted
+    # to support tags in versions 2.32 and up, but ended up supporting them
+    # in version 2.32 only. Since we need a new microversion to add request
+    # body attributes, tags have been re-added in version 2.42.
+    if version == '2.32' or request_version >= version_242:
+        return schema_block_device_mapping.server_create_with_tags
+    else:
+        return schema_block_device_mapping.server_create

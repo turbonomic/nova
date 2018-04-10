@@ -16,6 +16,7 @@
 import copy
 
 import mock
+from oslo_serialization import jsonutils
 from oslo_utils import timeutils
 
 from nova import context
@@ -46,6 +47,7 @@ fake_db_dev = {
     'deleted': None,
     'parent_addr': None,
     'id': 1,
+    'uuid': uuids.pci_dev1,
     'compute_node_id': 1,
     'address': 'a',
     'vendor_id': 'v',
@@ -67,6 +69,7 @@ fake_db_dev_1 = {
     'deleted_at': None,
     'deleted': None,
     'id': 2,
+    'uuid': uuids.pci_dev2,
     'parent_addr': 'a',
     'compute_node_id': 1,
     'address': 'a1',
@@ -89,6 +92,7 @@ fake_db_dev_old = {
     'deleted_at': None,
     'deleted': None,
     'id': 2,
+    'uuid': uuids.pci_dev2,
     'parent_addr': None,
     'compute_node_id': 1,
     'address': 'a1',
@@ -125,7 +129,7 @@ class _TestPciDeviceObject(object):
         self.assertEqual(self.pci_device.obj_what_changed(),
                          set(['compute_node_id', 'product_id', 'vendor_id',
                               'numa_node', 'status', 'address', 'extra_info',
-                              'dev_type', 'parent_addr']))
+                              'dev_type', 'parent_addr', 'uuid']))
 
     def test_pci_device_extra_info(self):
         self.dev_dict = copy.copy(dev_dict)
@@ -133,11 +137,24 @@ class _TestPciDeviceObject(object):
         self.dev_dict['k2'] = 'v2'
         self.pci_device = pci_device.PciDevice.create(None, self.dev_dict)
         extra_value = self.pci_device.extra_info
-        self.assertEqual(extra_value.get('k1'), 'v1')
+        self.assertEqual(extra_value.get('k1'), self.dev_dict['k1'])
         self.assertEqual(set(extra_value.keys()), set(('k1', 'k2')))
         self.assertEqual(self.pci_device.obj_what_changed(),
                          set(['compute_node_id', 'address', 'product_id',
-                              'vendor_id', 'numa_node', 'status',
+                              'vendor_id', 'numa_node', 'status', 'uuid',
+                              'extra_info', 'dev_type', 'parent_addr']))
+
+    def test_pci_device_extra_info_with_dict(self):
+        self.dev_dict = copy.copy(dev_dict)
+        self.dev_dict['k1'] = {'sub_k1': ['val1', 'val2']}
+        self.pci_device = pci_device.PciDevice.create(None, self.dev_dict)
+        extra_value = self.pci_device.extra_info
+        self.assertEqual(jsonutils.loads(extra_value.get('k1')),
+                         self.dev_dict['k1'])
+        self.assertEqual(set(extra_value.keys()), set(['k1']))
+        self.assertEqual(self.pci_device.obj_what_changed(),
+                         set(['compute_node_id', 'address', 'product_id',
+                              'vendor_id', 'numa_node', 'status', 'uuid',
                               'extra_info', 'dev_type', 'parent_addr']))
 
     def test_update_device(self):
@@ -176,6 +193,32 @@ class _TestPciDeviceObject(object):
         self.assertEqual(self.pci_device.product_id, 'p')
         self.assertEqual(self.pci_device.obj_what_changed(), set())
         mock_get.assert_called_once_with(ctxt, 1)
+
+    @mock.patch.object(db, 'pci_device_get_by_id')
+    @mock.patch.object(objects.PciDevice, 'save')
+    @mock.patch('oslo_utils.uuidutils.generate_uuid')
+    def test_get_by_dev_id_auto_generate_uuid(self, mock_uuid, mock_save,
+                                              mock_get):
+        """Tests loading an old db record which doesn't have a uuid set so
+        the object code auto-generates one and saves the update.
+        """
+        fake_db_dev_no_uuid = copy.deepcopy(fake_db_dev)
+        fake_db_dev_no_uuid['uuid'] = None
+        ctxt = context.get_admin_context()
+        mock_get.return_value = fake_db_dev_no_uuid
+        fake_uuid = '3afad0d9-d2db-46fd-b56b-79f90043de5e'
+        mock_uuid.return_value = fake_uuid
+
+        obj_dev = pci_device.PciDevice.get_by_dev_id(ctxt, 1)
+        self.assertEqual(fake_uuid, obj_dev.uuid)
+        # The obj_what_changed is still dirty from _from_db_object because we
+        # are mocking out save() which would eventually update the pci device
+        # in the database and call _from_db_object again on the updated record,
+        # and _from_db_object would reset the changed fields.
+        self.assertEqual(set(['uuid']), obj_dev.obj_what_changed())
+        mock_get.assert_called_once_with(ctxt, 1)
+        mock_save.assert_called_once_with()
+        mock_uuid.assert_called_once_with()
 
     def test_from_db_obj_pre_1_5_format(self):
         ctxt = context.get_admin_context()
@@ -264,38 +307,50 @@ class _TestPciDeviceObject(object):
         self.pci_device = pci_device.PciDevice.create(None, self.dev_dict)
         self.assertEqual(1, self.pci_device.numa_node)
 
-    def test_pci_device_equivalent(self):
+    @mock.patch('oslo_utils.uuidutils.generate_uuid',
+                return_value=uuids.pci_dev1)
+    def test_pci_device_equivalent(self, mock_uuid):
         pci_device1 = pci_device.PciDevice.create(None, dev_dict)
         pci_device2 = pci_device.PciDevice.create(None, dev_dict)
         self.assertEqual(pci_device1, pci_device2)
 
-    def test_pci_device_equivalent_with_ignore_field(self):
+    @mock.patch('oslo_utils.uuidutils.generate_uuid',
+                return_value=uuids.pci_dev1)
+    def test_pci_device_equivalent_with_ignore_field(self, mock_uuid):
         pci_device1 = pci_device.PciDevice.create(None, dev_dict)
         pci_device2 = pci_device.PciDevice.create(None, dev_dict)
         pci_device2.updated_at = timeutils.utcnow()
         self.assertEqual(pci_device1, pci_device2)
 
-    def test_pci_device_not_equivalent1(self):
+    @mock.patch('oslo_utils.uuidutils.generate_uuid',
+                return_value=uuids.pci_dev1)
+    def test_pci_device_not_equivalent1(self, mock_uuid):
         pci_device1 = pci_device.PciDevice.create(None, dev_dict)
         dev_dict2 = copy.copy(dev_dict)
         dev_dict2['address'] = 'b'
         pci_device2 = pci_device.PciDevice.create(None, dev_dict2)
         self.assertNotEqual(pci_device1, pci_device2)
 
-    def test_pci_device_not_equivalent2(self):
+    @mock.patch('oslo_utils.uuidutils.generate_uuid',
+                return_value=uuids.pci_dev1)
+    def test_pci_device_not_equivalent2(self, mock_uuid):
         pci_device1 = pci_device.PciDevice.create(None, dev_dict)
         pci_device2 = pci_device.PciDevice.create(None, dev_dict)
         delattr(pci_device2, 'address')
         self.assertNotEqual(pci_device1, pci_device2)
 
-    def test_pci_device_not_equivalent_with_none(self):
+    @mock.patch('oslo_utils.uuidutils.generate_uuid',
+                return_value=uuids.pci_dev1)
+    def test_pci_device_not_equivalent_with_none(self, mock_uuid):
         pci_device1 = pci_device.PciDevice.create(None, dev_dict)
         pci_device2 = pci_device.PciDevice.create(None, dev_dict)
         pci_device1.instance_uuid = 'aaa'
         pci_device2.instance_uuid = None
         self.assertNotEqual(pci_device1, pci_device2)
 
-    def test_pci_device_not_equivalent_with_not_pci_device(self):
+    @mock.patch('oslo_utils.uuidutils.generate_uuid',
+                return_value=uuids.pci_dev1)
+    def test_pci_device_not_equivalent_with_not_pci_device(self, mock_uuid):
         pci_device1 = pci_device.PciDevice.create(None, dev_dict)
         self.assertIsNotNone(pci_device1)
         self.assertNotEqual(pci_device1, 'foo')

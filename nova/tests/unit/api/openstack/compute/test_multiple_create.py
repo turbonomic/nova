@@ -52,10 +52,6 @@ class MultiCreateExtensionTestV21(test.TestCase):
         ext_info = extension_info.LoadedExtensionInfo()
         self.controller = servers_v21.ServersController(
             extension_info=ext_info)
-        CONF.set_override('extensions_blacklist', 'os-multiple-create',
-                          'osapi_v21')
-        self.no_mult_create_controller = servers_v21.ServersController(
-            extension_info=ext_info)
 
         def instance_get(context, instance_id):
             """Stub for compute/api create() pulling in instance after
@@ -101,46 +97,15 @@ class MultiCreateExtensionTestV21(test.TestCase):
                       fake_method)
         self.req = fakes.HTTPRequest.blank('')
 
-    def _test_create_extra(self, params, no_image=False,
-                           override_controller=None):
+    def _test_create_extra(self, params, no_image=False):
         image_uuid = 'c905cedb-7281-47e4-8a62-f26bc5fc4c77'
         server = dict(name='server_test', imageRef=image_uuid, flavorRef=2)
         if no_image:
             server.pop('imageRef', None)
         server.update(params)
         body = dict(server=server)
-        if override_controller:
-            server = override_controller.create(self.req,
-                                                body=body).obj['server']
-        else:
-            server = self.controller.create(self.req,
-                                            body=body).obj['server']
-
-    def _check_multiple_create_extension_disabled(self, **kwargs):
-        # NOTE: on v2.1 API, "create a server" API doesn't add the following
-        # attributes into kwargs when non-loading multiple_create extension.
-        # However, v2.0 API adds them as values "1" instead. So we need to
-        # define checking methods for each API here.
-        self.assertNotIn('min_count', kwargs)
-        self.assertNotIn('max_count', kwargs)
-
-    def test_create_instance_with_multiple_create_disabled(self):
-        min_count = 2
-        max_count = 3
-        params = {
-            multiple_create_v21.MIN_ATTRIBUTE_NAME: min_count,
-            multiple_create_v21.MAX_ATTRIBUTE_NAME: max_count,
-        }
-        old_create = compute_api.API.create
-
-        def create(*args, **kwargs):
-            self._check_multiple_create_extension_disabled(**kwargs)
-            return old_create(*args, **kwargs)
-
-        self.stub_out('nova.compute.api.API.create', create)
-        self._test_create_extra(
-            params,
-            override_controller=self.no_mult_create_controller)
+        server = self.controller.create(self.req,
+                                        body=body).obj['server']
 
     def test_multiple_create_with_string_type_min_and_max(self):
         min_count = '2'
@@ -220,8 +185,8 @@ class MultiCreateExtensionTestV21(test.TestCase):
             'server': {
                 multiple_create_v21.MIN_ATTRIBUTE_NAME: '',
                 'name': 'server_test',
-                'image_ref': image_href,
-                'flavor_ref': flavor_ref,
+                'imageRef': image_href,
+                'flavorRef': flavor_ref,
             }
         }
         self.assertRaises(self.validation_error,
@@ -237,8 +202,8 @@ class MultiCreateExtensionTestV21(test.TestCase):
             'server': {
                 multiple_create_v21.MAX_ATTRIBUTE_NAME: '',
                 'name': 'server_test',
-                'image_ref': image_href,
-                'flavor_ref': flavor_ref,
+                'imageRef': image_href,
+                'flavorRef': flavor_ref,
             }
         }
         self.assertRaises(self.validation_error,
@@ -466,3 +431,36 @@ class MultiCreateExtensionTestV21(test.TestCase):
 
         self.assertRaises(self.validation_error,
                           self.controller.create, self.req, body=body)
+
+    def test_create_multiple_instance_max_count_overquota_min_count_ok(self):
+        self.flags(instances=3, group='quota')
+        image_href = '76fa36fc-c930-4bf3-8c8a-ea2a2420deb6'
+        flavor_ref = 'http://localhost/123/flavors/3'
+        body = {
+            'server': {
+                multiple_create_v21.MIN_ATTRIBUTE_NAME: 2,
+                multiple_create_v21.MAX_ATTRIBUTE_NAME: 5,
+                'name': 'server_test',
+                'imageRef': image_href,
+                'flavorRef': flavor_ref,
+            }
+        }
+        res = self.controller.create(self.req, body=body).obj
+        instance_uuids = self.instance_cache_by_uuid.keys()
+        self.assertIn(res["server"]["id"], instance_uuids)
+
+    def test_create_multiple_instance_max_count_overquota_min_count_over(self):
+        self.flags(instances=3, group='quota')
+        image_href = '76fa36fc-c930-4bf3-8c8a-ea2a2420deb6'
+        flavor_ref = 'http://localhost/123/flavors/3'
+        body = {
+            'server': {
+                multiple_create_v21.MIN_ATTRIBUTE_NAME: 4,
+                multiple_create_v21.MAX_ATTRIBUTE_NAME: 5,
+                'name': 'server_test',
+                'imageRef': image_href,
+                'flavorRef': flavor_ref,
+            }
+        }
+        self.assertRaises(webob.exc.HTTPForbidden, self.controller.create,
+                          self.req, body=body)

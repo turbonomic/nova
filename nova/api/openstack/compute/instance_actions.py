@@ -15,6 +15,7 @@
 
 from webob import exc
 
+from nova.api.openstack import api_version_request
 from nova.api.openstack import common
 from nova.api.openstack import extensions
 from nova.api.openstack import wsgi
@@ -22,8 +23,6 @@ from nova import compute
 from nova.i18n import _
 from nova.policies import instance_actions as ia_policies
 from nova import utils
-
-ALIAS = "os-instance-actions"
 
 ACTION_KEYS = ['action', 'instance_uuid', 'request_id', 'user_id',
                'project_id', 'start_time', 'message']
@@ -43,9 +42,12 @@ class InstanceActionsController(wsgi.Controller):
             action[key] = action_raw.get(key)
         return action
 
-    def _format_event(self, event_raw):
+    def _format_event(self, event_raw, show_traceback=False):
         event = {}
         for key in EVENT_KEYS:
+            # By default, non-admins are not allowed to see traceback details.
+            if key == 'traceback' and not show_traceback:
+                continue
             event[key] = event_raw.get(key)
         return event
 
@@ -82,30 +84,25 @@ class InstanceActionsController(wsgi.Controller):
 
         action_id = action['id']
         action = self._format_action(action)
+        # Prior to microversion 2.51, events would only be returned in the
+        # response for admins by default policy rules. Starting in
+        # microversion 2.51, events are returned for admin_or_owner (of the
+        # instance) but the "traceback" field is only shown for admin users
+        # by default.
+        show_events = False
+        show_traceback = False
         if context.can(ia_policies.POLICY_ROOT % 'events', fatal=False):
+            # For all microversions, the user can see all event details
+            # including the traceback.
+            show_events = show_traceback = True
+        elif api_version_request.is_supported(req, '2.51'):
+            # The user is not able to see all event details, but they can at
+            # least see the non-traceback event details.
+            show_events = True
+
+        if show_events:
             events_raw = self.action_api.action_events_get(context, instance,
                                                            action_id)
-            action['events'] = [self._format_event(evt) for evt in events_raw]
+            action['events'] = [self._format_event(evt, show_traceback)
+                                for evt in events_raw]
         return {'instanceAction': action}
-
-
-class InstanceActions(extensions.V21APIExtensionBase):
-    """View a log of actions and events taken on an instance."""
-
-    name = "InstanceActions"
-    alias = ALIAS
-    version = 1
-
-    def get_resources(self):
-        ext = extensions.ResourceExtension(ALIAS,
-                                           InstanceActionsController(),
-                                           parent=dict(
-                                               member_name='server',
-                                               collection_name='servers'))
-        return [ext]
-
-    def get_controller_extensions(self):
-        """It's an abstract function V21APIExtensionBase and the extension
-        will not be loaded without it.
-        """
-        return []

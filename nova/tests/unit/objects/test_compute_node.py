@@ -90,6 +90,7 @@ fake_compute_node = {
     'cpu_allocation_ratio': 16.0,
     'ram_allocation_ratio': 1.5,
     'disk_allocation_ratio': 1.0,
+    'mapped': 0,
     }
 # FIXME(sbauza) : For compatibility checking, to be removed once we are sure
 # that all computes are running latest DB version with host field in it.
@@ -162,6 +163,39 @@ class _TestComputeNodeObject(object):
                          comparators=self.comparators())
         self.assertNotIn('uuid', compute.obj_what_changed())
         get_mock.assert_called_once_with(self.context, 123)
+
+    @mock.patch.object(compute_node.ComputeNodeList, 'get_all_by_uuids')
+    def test_get_by_uuid(self, get_all_by_uuids):
+        fake_node = copy.copy(fake_compute_node)
+        fake_node['stats'] = None
+        get_all_by_uuids.return_value = objects.ComputeNodeList(
+            objects=[objects.ComputeNode(**fake_node)])
+        compute = compute_node.ComputeNode.get_by_uuid(
+            self.context, uuidsentinel.fake_compute_node)
+        self.assertEqual(uuidsentinel.fake_compute_node, compute.uuid)
+        get_all_by_uuids.assert_called_once_with(
+            self.context, [uuidsentinel.fake_compute_node])
+
+    @mock.patch.object(compute_node.ComputeNodeList, 'get_all_by_uuids')
+    def test_get_by_uuid_not_found(self, get_all_by_uuids):
+        get_all_by_uuids.return_value = objects.ComputeNodeList()
+        self.assertRaises(exception.ComputeHostNotFound,
+                          compute_node.ComputeNode.get_by_uuid,
+                          self.context, uuidsentinel.fake_compute_node)
+        get_all_by_uuids.assert_called_once_with(
+            self.context, [uuidsentinel.fake_compute_node])
+
+    @mock.patch.object(db, 'compute_node_get')
+    def test_get_without_mapped(self, get_mock):
+        fake_node = copy.copy(fake_compute_node)
+        fake_node['mapped'] = None
+        get_mock.return_value = fake_node
+        compute = compute_node.ComputeNode.get_by_id(self.context, 123)
+        self.compare_obj(compute, fake_compute_node,
+                         subs=self.subs(),
+                         comparators=self.comparators())
+        self.assertIn('mapped', compute)
+        self.assertEqual(0, compute.mapped)
 
     @mock.patch.object(objects.Service, 'get_by_id')
     @mock.patch.object(db, 'compute_node_get')
@@ -538,6 +572,17 @@ class _TestComputeNodeObject(object):
         self.assertEqual(16.0, compute.cpu_allocation_ratio)
         self.assertEqual(1.5, compute.ram_allocation_ratio)
         self.assertEqual(1.0, compute.disk_allocation_ratio)
+
+    def test_get_all_by_not_mapped(self):
+        for mapped in (1, 0, 1, 3):
+            compute = fake_compute_with_resources.obj_clone()
+            compute._context = self.context
+            compute.mapped = mapped
+            compute.create()
+        nodes = compute_node.ComputeNodeList.get_all_by_not_mapped(
+            self.context, 2)
+        self.assertEqual(3, len(nodes))
+        self.assertEqual([0, 1, 1], sorted([x.mapped for x in nodes]))
 
 
 class TestComputeNodeObject(test_objects._LocalTest,

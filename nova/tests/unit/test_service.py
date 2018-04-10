@@ -33,9 +33,9 @@ from nova import test
 from nova.tests.unit import utils
 
 test_service_opts = [
-    cfg.StrOpt("test_service_listen",
-               default='127.0.0.1',
-               help="Host to bind test service to"),
+    cfg.HostAddressOpt("test_service_listen",
+                       default='127.0.0.1',
+                       help="Host to bind test service to"),
     cfg.IntOpt("test_service_listen_port",
                default=0,
                help="Port number to bind test service to"),
@@ -340,7 +340,8 @@ class TestLauncher(test.NoDBTestCase):
         service.serve(mock.sentinel.service)
         mock_launch.assert_called_once_with(mock.ANY,
                                             mock.sentinel.service,
-                                            workers=None)
+                                            workers=None,
+                                            restart_method='mutate')
 
     @mock.patch.object(_service, 'launch')
     def test_launch_app_with_workers(self, mock_launch):
@@ -348,7 +349,8 @@ class TestLauncher(test.NoDBTestCase):
         service.serve(mock.sentinel.service, workers=mock.sentinel.workers)
         mock_launch.assert_called_once_with(mock.ANY,
                                             mock.sentinel.service,
-                                            workers=mock.sentinel.workers)
+                                            workers=mock.sentinel.workers,
+                                            restart_method='mutate')
 
     @mock.patch.object(_service, 'launch')
     def test_launch_app_more_than_once_raises(self, mock_launch):

@@ -19,16 +19,19 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-admin-password'
-POLICY_ROOT = 'os_compute_api:os-admin-password:%s'
 
 
 admin_password_policies = [
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'discoverable',
-        check_str=base.RULE_ANY),
-    policy.RuleDefault(
-        name=BASE_POLICY_NAME,
-        check_str=base.RULE_ADMIN_OR_OWNER),
+    policy.DocumentedRuleDefault(
+        BASE_POLICY_NAME,
+        base.RULE_ADMIN_OR_OWNER,
+        "Change the administrative password for a server",
+        [
+            {
+                'path': '/servers/{server_id}/action (changePassword)',
+                'method': 'POST'
+            }
+        ])
 ]
 
 

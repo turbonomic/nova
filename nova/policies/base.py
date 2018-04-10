@@ -13,36 +13,28 @@
 from oslo_policy import policy
 
 COMPUTE_API = 'os_compute_api'
-NETWORK_ATTACH_EXTERNAL = 'network:attach_external_network'
 
 RULE_ADMIN_OR_OWNER = 'rule:admin_or_owner'
 RULE_ADMIN_API = 'rule:admin_api'
 RULE_ANY = '@'
 
+# NOTE(johngarbutt) The base rules here affect so many APIs the list
+# of related API operations has not been populated. It would be
+# crazy hard to manually maintain such a list.
 rules = [
-    policy.RuleDefault('context_is_admin', 'role:admin'),
-    policy.RuleDefault('admin_or_owner',
-                       'is_admin:True or project_id:%(project_id)s'),
-    policy.RuleDefault('admin_api', 'is_admin:True'),
-    policy.RuleDefault(NETWORK_ATTACH_EXTERNAL, 'is_admin:True'),
+    policy.RuleDefault(
+        "context_is_admin",
+        "role:admin",
+        "Decides what is required for the 'is_admin:True' check to succeed."),
+    policy.RuleDefault(
+        "admin_or_owner",
+        "is_admin:True or project_id:%(project_id)s",
+        "Default rule for most non-Admin APIs."),
+    policy.RuleDefault(
+        "admin_api",
+        "is_admin:True",
+        "Default rule for most Admin APIs.")
 ]
-
-
-def create_rule_default(name, check_str, description, operations):
-    # TODO(sneti): use DocumentedRuleDefault instead of RuleDefault
-    # when oslo.policy library with DocumentedRuleDefault change is released.
-    # formatted_description hack can be removed then.
-    ops = ""
-    for operation in operations:
-            ops += ('%(method)s %(path)s\n' %
-                     {'method': operation['method'],
-                      'path': operation['path']})
-    template = """%(description)s\n%(operations)s"""
-    formatted_description = template % {
-        "description": description,
-        "operations": ops,
-    }
-    return policy.RuleDefault(name, check_str, formatted_description)
 
 
 def list_rules():

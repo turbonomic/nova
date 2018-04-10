@@ -19,16 +19,31 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-floating-ips-bulk'
-POLICY_ROOT = 'os_compute_api:os-floating-ips-bulk:%s'
 
 
 floating_ips_bulk_policies = [
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'discoverable',
-        check_str=base.RULE_ANY),
-    policy.RuleDefault(
-        name=BASE_POLICY_NAME,
-        check_str=base.RULE_ADMIN_API),
+    policy.DocumentedRuleDefault(
+        BASE_POLICY_NAME,
+        base.RULE_ADMIN_API,
+        "Bulk-create, delete, and list floating IPs. API is deprecated.",
+        [
+            {
+                'method': 'GET',
+                'path': '/os-floating-ips-bulk'
+            },
+            {
+                'method': 'POST',
+                'path': '/os-floating-ips-bulk'
+            },
+            {
+                'method': 'PUT',
+                'path': '/os-floating-ips-bulk/delete'
+            },
+            {
+                'method': 'GET',
+                'path': '/os-floating-ips-bulk/{host_name}'
+            },
+        ]),
 ]
 
 

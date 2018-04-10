@@ -60,21 +60,17 @@ function configure_and_start_glance {
     echo 'check processes before glance-api stop'
     $ANSIBLE primary --sudo -f 5 -i "$WORKSPACE/inventory" -m shell -a "ps aux | grep glance-api"
 
-    #stop g-api
-    stop 'primary' 'g-api'
+    # restart glance
+    $ANSIBLE primary --sudo -f 5 -i "$WORKSPACE/inventory" -m shell -a "systemctl restart devstack@g-api"
 
     echo 'check processes after glance-api stop'
-    $ANSIBLE primary --sudo -f 5 -i "$WORKSPACE/inventory" -m shell -a "ps aux | grep glance-api"
-
-    # restart glance
-    sudo -H -u $STACK_USER bash -c "/tmp/start_process.sh g-api '/usr/local/bin/glance-api --config-file=/etc/glance/glance-api.conf'"
     $ANSIBLE primary --sudo -f 5 -i "$WORKSPACE/inventory" -m shell -a "ps aux | grep glance-api"
 }
 
 function _ceph_configure_nova {
     #setup ceph for nova, we don't reuse configure_ceph_nova - as we need to emulate case where cinder is not configured for ceph
     sudo ceph -c ${CEPH_CONF_FILE} osd pool create ${NOVA_CEPH_POOL} ${NOVA_CEPH_POOL_PG} ${NOVA_CEPH_POOL_PGP}
-    NOVA_CONF=${NOVA_CONF:-/etc/nova/nova.conf}
+    NOVA_CONF=${NOVA_CPU_CONF:-/etc/nova/nova.conf}
     $ANSIBLE all --sudo -f 5 -i "$WORKSPACE/inventory" -m ini_file -a  "dest=${NOVA_CONF} section=libvirt option=rbd_user value=${CINDER_CEPH_USER}"
     $ANSIBLE all --sudo -f 5 -i "$WORKSPACE/inventory" -m ini_file -a  "dest=${NOVA_CONF} section=libvirt option=rbd_secret_uuid value=${CINDER_CEPH_UUID}"
     $ANSIBLE all --sudo -f 5 -i "$WORKSPACE/inventory" -m ini_file -a  "dest=${NOVA_CONF} section=libvirt option=inject_key value=false"
@@ -109,19 +105,10 @@ function configure_and_start_nova {
     echo 'check compute processes before restart'
     $ANSIBLE all --sudo -f 5 -i "$WORKSPACE/inventory" -m shell -a "ps aux | grep compute"
 
-    #stop nova-compute
-    stop 'all' 'n-cpu'
+    # restart nova-compute
+    $ANSIBLE all --sudo -f 5 -i "$WORKSPACE/inventory" -m shell -a "systemctl restart devstack@n-cpu"
 
-    echo 'check processes after compute stop'
-    $ANSIBLE all --sudo -f 5 -i "$WORKSPACE/inventory" -m shell -a "ps aux | grep compute"
-
-    # restart  local nova-compute
-    sudo -H -u $STACK_USER bash -c "/tmp/start_process.sh n-cpu '/usr/local/bin/nova-compute --config-file /etc/nova/nova.conf' libvirtd"
-
-    # restart remote nova-compute
-    for SUBNODE in $SUBNODES ; do
-        ssh $SUBNODE "sudo -H -u $STACK_USER bash -c '/tmp/start_process.sh n-cpu \"/usr/local/bin/nova-compute --config-file /etc/nova/nova.conf\" libvirtd'"
-    done
+    # test that they are all running again
     $ANSIBLE all --sudo -f 5 -i "$WORKSPACE/inventory" -m shell -a "ps aux | grep compute"
 
 }
@@ -150,9 +137,10 @@ function _ceph_configure_cinder {
 
 function configure_and_start_cinder {
     _ceph_configure_cinder
-    stop 'primary' 'c-vol'
 
-    sudo -H -u $STACK_USER bash -c "/tmp/start_process.sh c-vol '/usr/local/bin/cinder-volume --config-file /etc/cinder/cinder.conf'"
+    # restart cinder
+    $ANSIBLE primary --sudo -f 5 -i "$WORKSPACE/inventory" -m shell -a "systemctl restart devstack@c-vol"
+
     source $BASE/new/devstack/openrc
 
     export OS_USERNAME=admin

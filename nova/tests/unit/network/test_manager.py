@@ -42,7 +42,6 @@ from nova.network import rpcapi as network_rpcapi
 from nova import objects
 from nova.objects import network as network_obj
 from nova.objects import virtual_interface as vif_obj
-from nova import quota
 from nova import test
 from nova.tests.unit.api.openstack import fakes
 from nova.tests.unit import fake_instance
@@ -643,39 +642,92 @@ class FlatNetworkTestCase(test.TestCase):
         self.assertEqual(0, res[1]['id'])
 
     @mock.patch('nova.objects.instance.Instance.get_by_uuid')
-    @mock.patch('nova.objects.quotas.Quotas.reserve')
+    @mock.patch('nova.objects.quotas.Quotas.check_deltas')
     @mock.patch('nova.objects.quotas.ids_from_instance')
-    def test_allocate_calculates_quota_auth(self, util_method, reserve,
+    def test_allocate_calculates_quota_auth(self, util_method, check,
                                             get_by_uuid):
         inst = objects.Instance()
         inst['uuid'] = uuids.instance
         get_by_uuid.return_value = inst
-        usages = {'fixed_ips': {'in_use': 10, 'reserved': 1}}
-        reserve.side_effect = exception.OverQuota(overs='testing',
-                                                  quotas={'fixed_ips': 10},
-                                                  usages=usages)
+        check.side_effect = exception.OverQuota(overs='testing',
+                                                quotas={'fixed_ips': 10},
+                                                usages={'fixed_ips': 10})
         util_method.return_value = ('foo', 'bar')
         self.assertRaises(exception.FixedIpLimitExceeded,
                           self.network.allocate_fixed_ip,
                           self.context, 123, {'uuid': uuids.instance})
         util_method.assert_called_once_with(self.context, inst)
 
-    @mock.patch('nova.objects.fixed_ip.FixedIP.get_by_address')
-    @mock.patch('nova.objects.quotas.Quotas.reserve')
+    @mock.patch('nova.objects.fixed_ip.FixedIP.disassociate')
+    @mock.patch('nova.objects.fixed_ip.FixedIP.associate_pool')
+    @mock.patch('nova.objects.instance.Instance.get_by_uuid')
+    @mock.patch('nova.objects.quotas.Quotas.check_deltas')
     @mock.patch('nova.objects.quotas.ids_from_instance')
-    def test_deallocate_calculates_quota_auth(self, util_method, reserve,
-                                              get_by_address):
-        inst = objects.Instance(uuid=uuids.instance)
-        fip = objects.FixedIP(instance_uuid=uuids.instance,
-                              virtual_interface_id=1)
-        get_by_address.return_value = fip
+    def test_allocate_over_quota_during_recheck(self, util_method, check,
+                                                get_by_uuid, associate,
+                                                disassociate):
+        inst = objects.Instance()
+        inst['uuid'] = uuids.instance
+        get_by_uuid.return_value = inst
+
+        # Simulate a race where the first check passes and the recheck fails.
+        check.side_effect = [None, exception.OverQuota(
+                                overs='fixed_ips', quotas={'fixed_ips': 10},
+                                usages={'fixed_ips': 10})]
+
         util_method.return_value = ('foo', 'bar')
-        # This will fail right after the reserve call when it tries
-        # to look up the fake instance we created above
-        self.assertRaises(exception.InstanceNotFound,
-                          self.network.deallocate_fixed_ip,
-                          self.context, '1.2.3.4', instance=inst)
-        util_method.assert_called_once_with(self.context, inst)
+        address = netaddr.IPAddress('1.2.3.4')
+        fip = objects.FixedIP(instance_uuid=inst.uuid,
+                              address=address,
+                              virtual_interface_id=1)
+        associate.return_value = fip
+
+        network = network_obj.Network._from_db_object(
+            self.context, network_obj.Network(), test_network.fake_network)
+        network.save = mock.MagicMock()
+        self.assertRaises(exception.FixedIpLimitExceeded,
+                          self.network.allocate_fixed_ip,
+                          self.context, inst.uuid, network)
+
+        self.assertEqual(2, check.call_count)
+        call1 = mock.call(self.context, {'fixed_ips': 1}, 'foo')
+        call2 = mock.call(self.context, {'fixed_ips': 0}, 'foo')
+        check.assert_has_calls([call1, call2])
+
+        # Verify we removed the fixed IP that was added after the first quota
+        # check passed.
+        disassociate.assert_called_once_with(self.context)
+
+    @mock.patch('nova.objects.fixed_ip.FixedIP.associate_pool')
+    @mock.patch('nova.objects.instance.Instance.get_by_uuid')
+    @mock.patch('nova.objects.quotas.Quotas.check_deltas')
+    @mock.patch('nova.objects.quotas.ids_from_instance')
+    def test_allocate_no_quota_recheck(self, util_method, check, get_by_uuid,
+                                       associate):
+        # Disable recheck_quota.
+        self.flags(recheck_quota=False, group='quota')
+
+        inst = objects.Instance()
+        inst['uuid'] = uuids.instance
+        inst['display_name'] = 'test'
+        get_by_uuid.return_value = inst
+
+        util_method.return_value = ('foo', 'bar')
+        network = network_obj.Network._from_db_object(
+            self.context, network_obj.Network(), test_network.fake_network)
+        network.save = mock.MagicMock()
+
+        @mock.patch.object(self.network, '_setup_network_on_host')
+        @mock.patch.object(self.network, 'instance_dns_manager')
+        @mock.patch.object(self.network,
+            '_do_trigger_security_group_members_refresh_for_instance')
+        def _test(trigger, dns, setup):
+            self.network.allocate_fixed_ip(self.context, inst.uuid, network)
+
+        _test()
+
+        # check_deltas should have been called only once.
+        check.assert_called_once_with(self.context, {'fixed_ips': 1}, 'foo')
 
     @mock.patch('nova.objects.instance.Instance.get_by_uuid')
     @mock.patch('nova.objects.fixed_ip.FixedIP.associate')
@@ -947,6 +999,39 @@ class VlanNetworkTestCase(test.TestCase):
             dict(test_network.fake_network, **networks[0]))
         network.vpn_private_address = '192.168.0.2'
         self.network.allocate_fixed_ip(self.context, FAKEUUID, network)
+
+    @mock.patch('nova.objects.fixed_ip.FixedIP.associate_pool')
+    @mock.patch('nova.objects.instance.Instance.get_by_uuid')
+    @mock.patch('nova.objects.QuotasNoOp.check_deltas')
+    @mock.patch('nova.objects.quotas.ids_from_instance')
+    def test_allocate_fixed_ip_super_call(self, mock_ids, mock_check, mock_get,
+                                          mock_associate):
+        # No code in the VlanManager actually calls
+        # NetworkManager.allocate_fixed_ip() at this time. This is just to
+        # test that if it did, it would call through the QuotasNoOp class.
+        inst = objects.Instance()
+        inst['uuid'] = uuids.instance
+        inst['display_name'] = 'test'
+        mock_get.return_value = inst
+
+        mock_ids.return_value = ('foo', 'bar')
+
+        network = network_obj.Network._from_db_object(
+            self.context, network_obj.Network(), test_network.fake_network)
+        network.save = mock.MagicMock()
+
+        @mock.patch.object(self.network, '_setup_network_on_host')
+        @mock.patch.object(self.network, 'instance_dns_manager')
+        @mock.patch.object(self.network,
+            '_do_trigger_security_group_members_refresh_for_instance')
+        def _test(trigger, dns, setup):
+            super(network_manager.VlanManager, self.network).allocate_fixed_ip(
+                self.context, FAKEUUID, network)
+
+        _test()
+
+        # Make sure we called the QuotasNoOp.check_deltas() for VlanManager.
+        self.assertEqual(2, mock_check.call_count)
 
     @mock.patch('nova.network.manager.VlanManager._setup_network_on_host')
     @mock.patch('nova.network.manager.VlanManager.'
@@ -1251,41 +1336,47 @@ class VlanNetworkTestCase(test.TestCase):
 
         self.network.allocate_floating_ip(ctxt, ctxt.project_id)
 
-    @mock.patch('nova.quota.QUOTAS.reserve')
-    @mock.patch('nova.quota.QUOTAS.commit')
-    def test_deallocate_floating_ip(self, mock_commit, mock_reserve):
+    @mock.patch('nova.objects.FloatingIP.deallocate')
+    @mock.patch('nova.network.floating_ips.FloatingIP.'
+                '_floating_ip_owned_by_project')
+    @mock.patch('nova.objects.FloatingIP.get_by_address')
+    def test_deallocate_floating_ip(self, mock_get, mock_owned, mock_dealloc):
         ctxt = context.RequestContext('testuser', fakes.FAKE_PROJECT_ID,
                                       is_admin=False)
 
         def fake1(*args, **kwargs):
-            return dict(test_floating_ip.fake_floating_ip)
+            params = dict(test_floating_ip.fake_floating_ip)
+            return objects.FloatingIP(**params)
 
         def fake2(*args, **kwargs):
-            return dict(test_floating_ip.fake_floating_ip,
-                        address='10.0.0.1', fixed_ip_id=1)
+            params = dict(test_floating_ip.fake_floating_ip,
+                          address='10.0.0.1', fixed_ip_id=1)
+            return objects.FloatingIP(**params)
 
         def fake3(*args, **kwargs):
-            return dict(test_floating_ip.fake_floating_ip,
-                        address='10.0.0.1', fixed_ip_id=None,
-                        project_id=ctxt.project_id)
+            params = dict(test_floating_ip.fake_floating_ip,
+                          address='10.0.0.1', fixed_ip_id=None,
+                          project_id=ctxt.project_id)
+            return objects.FloatingIP(**params)
 
-        self.stubs.Set(self.network.db, 'floating_ip_deallocate', fake1)
-        self.stubs.Set(self.network, '_floating_ip_owned_by_project', fake1)
+        mock_dealloc.side_effect = fake1
+        mock_owned.side_effect = fake1
+        mock_get.side_effect = fake2
 
-        # this time should raise because floating ip is associated to fixed_ip
-        self.stubs.Set(self.network.db, 'floating_ip_get_by_address', fake2)
+        # this time should raise because floating ip is associated to
+        # fixed_ip
         self.assertRaises(exception.FloatingIpAssociated,
                           self.network.deallocate_floating_ip,
                           ctxt,
-                          mox.IgnoreArg())
+                          'fake-address')
+        mock_dealloc.assert_not_called()
 
-        mock_reserve.return_value = 'reserve'
         # this time should not raise
-        self.stubs.Set(self.network.db, 'floating_ip_get_by_address', fake3)
-        self.network.deallocate_floating_ip(ctxt, ctxt.project_id)
+        mock_dealloc.reset_mock()
+        mock_get.side_effect = fake3
 
-        mock_commit.assert_called_once_with(ctxt, 'reserve',
-                                            project_id=fakes.FAKE_PROJECT_ID)
+        self.network.deallocate_floating_ip(ctxt, 'fake-address')
+        mock_dealloc.assert_called_once_with(ctxt, 'fake-address')
 
     @mock.patch('nova.db.fixed_ip_get')
     def test_associate_floating_ip(self, fixed_get):
@@ -2671,22 +2762,6 @@ class CommonNetworkTestCase(test.TestCase):
         #     Determine networks to NAT based on lookup
         self._test_init_host_dynamic_fixed_range(self.network)
 
-    @mock.patch('nova.objects.quotas.Quotas.rollback')
-    @mock.patch('nova.objects.fixed_ip.FixedIP.get_by_address')
-    @mock.patch('nova.network.manager.NetworkManager.'
-                '_do_trigger_security_group_members_refresh_for_instance')
-    def test_fixed_ip_cleanup_rollback(self, fake_trig,
-                                      fixed_get, rollback):
-        manager = network_manager.NetworkManager()
-
-        fake_trig.side_effect = test.TestingException
-
-        self.assertRaises(test.TestingException,
-                          manager.deallocate_fixed_ip,
-                          self.context, 'fake', 'fake',
-                          instance=fake_inst(uuid=uuids.non_existent_uuid))
-        rollback.assert_called_once_with()
-
     def test_fixed_cidr_out_of_range(self):
         manager = network_manager.NetworkManager()
         ctxt = context.get_admin_context()
@@ -2971,35 +3046,6 @@ class FloatingIPTestCase(test.TestCase):
                 instance_id=instance_ref['id'])
         self.network.deallocate_for_instance(self.context,
                 instance_id=instance_ref['id'])
-
-    def test_deallocate_floating_ip_quota_rollback(self):
-        ctxt = context.RequestContext('testuser', fakes.FAKE_PROJECT_ID,
-                                      is_admin=False)
-
-        def fake(*args, **kwargs):
-            return dict(test_floating_ip.fake_floating_ip,
-                        address='10.0.0.1', fixed_ip_id=None,
-                        project_id=ctxt.project_id)
-
-        self.stubs.Set(self.network.db, 'floating_ip_get_by_address', fake)
-        self.mox.StubOutWithMock(db, 'floating_ip_deallocate')
-        self.mox.StubOutWithMock(self.network,
-                                 '_floating_ip_owned_by_project')
-        self.mox.StubOutWithMock(quota.QUOTAS, 'reserve')
-        self.mox.StubOutWithMock(quota.QUOTAS, 'rollback')
-        quota.QUOTAS.reserve(self.context,
-                             floating_ips=-1,
-                             project_id=fakes.FAKE_PROJECT_ID
-                             ).AndReturn('fake-rsv')
-        self.network._floating_ip_owned_by_project(self.context,
-                                                   mox.IgnoreArg())
-        db.floating_ip_deallocate(mox.IgnoreArg(),
-                                  mox.IgnoreArg()).AndReturn(None)
-        quota.QUOTAS.rollback(self.context, 'fake-rsv',
-                              project_id=fakes.FAKE_PROJECT_ID)
-
-        self.mox.ReplayAll()
-        self.network.deallocate_floating_ip(self.context, '10.0.0.1')
 
     def test_deallocation_deleted_instance(self):
         self.stubs.Set(self.network, '_teardown_network_on_host',

@@ -23,6 +23,7 @@ from nova.tests.unit.virt.xenapi import stubs
 from nova.virt.xenapi import network_utils
 from nova.virt.xenapi import vif
 from nova.virt.xenapi import vm_utils
+import os_xenapi
 
 
 fake_vif = {
@@ -172,6 +173,14 @@ class XenAPIBridgeDriverTestCase(XenVIFDriverTestBase, object):
         ret_vif_ref = self.bridge_driver.plug(instance, vif, vm_ref, device)
         self.assertEqual('fake_vif_ref', ret_vif_ref)
 
+    @mock.patch.object(vif.vm_utils, 'lookup', return_value=None)
+    def test_plug_exception(self, mock_lookup):
+        instance = {'name': "fake_instance_name"}
+        self.assertRaises(exception.VirtualInterfacePlugException,
+                          self.bridge_driver.plug, instance, fake_vif,
+                          vm_ref=None, device=1)
+        mock_lookup.assert_called_once_with(self._session, instance['name'])
+
 
 class XenAPIOpenVswitchDriverTestCase(XenVIFDriverTestBase):
     def setUp(self):
@@ -199,6 +208,14 @@ class XenAPIOpenVswitchDriverTestCase(XenVIFDriverTestBase):
         mock_hot_plug.assert_called_once_with(fake_vif, instance,
                                               'fake_vm_ref', 'fake_vif_ref')
 
+    @mock.patch.object(vif.vm_utils, 'lookup', return_value=None)
+    def test_plug_exception(self, mock_lookup):
+        instance = {'name': "fake_instance_name"}
+        self.assertRaises(exception.VirtualInterfacePlugException,
+                          self.ovs_driver.plug, instance, fake_vif,
+                          vm_ref=None, device=1)
+        mock_lookup.assert_called_once_with(self._session, instance['name'])
+
     @mock.patch.object(vif.XenAPIOpenVswitchDriver,
                        'delete_network_and_bridge')
     @mock.patch.object(network_utils, 'find_network_with_name_label',
@@ -221,17 +238,14 @@ class XenAPIOpenVswitchDriverTestCase(XenVIFDriverTestBase):
 
     @mock.patch.object(vif.XenAPIOpenVswitchDriver, '_delete_linux_bridge')
     @mock.patch.object(vif.XenAPIOpenVswitchDriver, '_delete_linux_port')
-    @mock.patch.object(vif.XenAPIOpenVswitchDriver, '_device_exists')
-    @mock.patch.object(vif.XenAPIOpenVswitchDriver, '_ovs_del_br')
-    @mock.patch.object(vif.XenAPIOpenVswitchDriver, '_ovs_del_port')
+    @mock.patch.object(os_xenapi.client.host_network, 'ovs_del_br')
+    @mock.patch.object(os_xenapi.client.host_network, 'ovs_del_port')
     @mock.patch.object(network_utils, 'find_network_with_name_label')
     def test_delete_network_and_bridge(self, mock_find_network,
                                        mock_ovs_del_port, mock_ovs_del_br,
-                                       mock_device_exists,
                                        mock_delete_linux_port,
                                        mock_delete_linux_bridge):
         mock_find_network.return_value = 'fake_network'
-        mock_device_exists.return_value = True
         instance = {'name': 'fake_instance'}
         vif = {'id': 'fake_vif'}
         self._session.network = mock.Mock()
@@ -245,7 +259,7 @@ class XenAPIOpenVswitchDriverTestCase(XenVIFDriverTestBase):
         self.assertTrue(mock_delete_linux_bridge.called)
         self.assertTrue(mock_ovs_del_br.called)
 
-    @mock.patch.object(vif.XenAPIOpenVswitchDriver, '_ovs_del_port')
+    @mock.patch.object(os_xenapi.client.host_network, 'ovs_del_port')
     @mock.patch.object(network_utils, 'find_network_with_name_label',
                        return_value='fake_network')
     def test_delete_network_and_bridge_destroy_exception(self,
@@ -267,9 +281,9 @@ class XenAPIOpenVswitchDriverTestCase(XenVIFDriverTestBase):
         self.assertTrue(mock_ovs_del_port.called)
 
     @mock.patch.object(vif.XenAPIOpenVswitchDriver, '_device_exists')
-    @mock.patch.object(vif.XenAPIOpenVswitchDriver, '_brctl_add_if')
+    @mock.patch.object(os_xenapi.client.host_network, 'brctl_add_if')
     @mock.patch.object(vif.XenAPIOpenVswitchDriver, '_create_linux_bridge')
-    @mock.patch.object(vif.XenAPIOpenVswitchDriver, '_ovs_add_port')
+    @mock.patch.object(os_xenapi.client.host_network, 'ovs_add_port')
     def test_post_start_actions(self, mock_ovs_add_port,
                                 mock_create_linux_bridge,
                                 mock_brctl_add_if, mock_device_exists):
@@ -279,7 +293,8 @@ class XenAPIOpenVswitchDriverTestCase(XenVIFDriverTestBase):
                         'MAC': fake_vif['address'],
                         'network': 'fake_network',
                         'other_config': {
-                            'nicira-iface-id': 'fake-nicira-iface-id'}
+                            'nicira-iface-id': 'fake-nicira-iface-id',
+                            'neutron-port-id': 'fake-neutron-port-id'}
                        }
         mock_VIF_get_record = self.mock_patch_object(
             self._session.VIF, 'get_record', return_val=fake_vif_rec)
@@ -300,9 +315,9 @@ class XenAPIOpenVswitchDriverTestCase(XenVIFDriverTestBase):
         self.assertTrue(mock_brctl_add_if.called)
 
     @mock.patch.object(vif.XenAPIOpenVswitchDriver, '_device_exists')
-    @mock.patch.object(vif.XenAPIOpenVswitchDriver, '_brctl_add_if')
+    @mock.patch.object(os_xenapi.client.host_network, 'brctl_add_if')
     @mock.patch.object(vif.XenAPIOpenVswitchDriver, '_create_linux_bridge')
-    @mock.patch.object(vif.XenAPIOpenVswitchDriver, '_ovs_add_port')
+    @mock.patch.object(os_xenapi.client.host_network, 'ovs_add_port')
     def test_post_start_actions_tap_exist(self, mock_ovs_add_port,
                                 mock_create_linux_bridge,
                                 mock_brctl_add_if, mock_device_exists):
@@ -312,7 +327,8 @@ class XenAPIOpenVswitchDriverTestCase(XenVIFDriverTestBase):
                         'MAC': fake_vif['address'],
                         'network': 'fake_network',
                         'other_config': {
-                            'nicira-iface-id': 'fake-nicira-iface-id'}
+                            'nicira-iface-id': 'fake-nicira-iface-id',
+                            'neutron-port-id': 'fake-neutron-port-id'}
                        }
         mock_VIF_get_record = self.mock_patch_object(
             self._session.VIF, 'get_record', return_val=fake_vif_rec)

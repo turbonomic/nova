@@ -130,6 +130,14 @@ class TestNeutronSecurityGroupsV21(
         # Enforced by Neutron server.
         pass
 
+    def test_create_security_group_over_quota_during_recheck(self):
+        # Enforced by Neutron server.
+        pass
+
+    def test_create_security_group_no_quota_recheck(self):
+        # Enforced by Neutron server.
+        pass
+
     def test_update_security_group(self):
         # Enforced by Neutron server.
         pass
@@ -480,6 +488,14 @@ class _TestNeutronSecurityGroupRulesBase(object):
         self.controller.delete(req, security_group_rule['id'])
 
     def test_create_rule_quota_limit(self):
+        # Enforced by neutron
+        pass
+
+    def test_create_rule_over_quota_during_recheck(self):
+        # Enforced by neutron
+        pass
+
+    def test_create_rule_no_quota_recheck(self):
         # Enforced by neutron
         pass
 

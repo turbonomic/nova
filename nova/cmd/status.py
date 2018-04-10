@@ -203,9 +203,10 @@ class UpgradeCommands(object):
             versions = self._placement_get("/")
             max_version = pkg_resources.parse_version(
                 versions["versions"][0]["max_version"])
-            # NOTE(rpodolyaka): 1.4 is needed in Pike and further as
-            # FilterScheduler will no longer fall back to not using placement
-            needs_version = pkg_resources.parse_version("1.4")
+            # NOTE(rpodolyaka): 1.10 is needed in Pike and further as
+            # FilterScheduler requires GET /allocation_candidates in the
+            # Placement API.
+            needs_version = pkg_resources.parse_version("1.10")
             if max_version < needs_version:
                 msg = (_('Placement API version %(needed)s needed, '
                          'you have %(current)s.') %
@@ -290,8 +291,8 @@ class UpgradeCommands(object):
         ctxt = nova_context.get_admin_context()
         num_computes = 0
         for cell_mapping in cell_mappings:
-            with nova_context.target_cell(ctxt, cell_mapping):
-                num_computes += self._count_compute_nodes(ctxt)
+            with nova_context.target_cell(ctxt, cell_mapping) as cctxt:
+                num_computes += self._count_compute_nodes(cctxt)
         else:
             # There are no cell mappings, cells v2 was maybe not deployed in
             # Newton, but placement might have been, so let's check the single

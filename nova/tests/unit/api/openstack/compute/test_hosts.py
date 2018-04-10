@@ -13,9 +13,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import mock
 import testtools
 import webob.exc
 
+from nova.api.openstack import api_version_request as api_version
 from nova.api.openstack.compute import hosts as os_hosts_v21
 from nova.compute import power_state
 from nova.compute import vm_states
@@ -23,6 +25,7 @@ from nova import context as context_maker
 from nova import db
 from nova import exception
 from nova import test
+from nova.tests import fixtures
 from nova.tests.unit.api.openstack import fakes
 from nova.tests.unit import fake_hosts
 from nova.tests import uuidsentinel
@@ -129,6 +132,7 @@ def _create_instance_dict(**kwargs):
 class FakeRequestWithNovaZone(object):
     environ = {"nova.context": context_maker.get_admin_context()}
     GET = {"zone": "nova"}
+    api_version_request = api_version.APIVersionRequest('2.1')
 
 
 class HostTestCaseV21(test.TestCase):
@@ -158,6 +162,7 @@ class HostTestCaseV21(test.TestCase):
         self.controller = self.Controller()
         self.hosts_api = self.controller.api
         self.req = fakes.HTTPRequest.blank('', use_admin_context=True)
+        self.useFixture(fixtures.SingleCellSimple())
 
         self._setup_stubs()
 
@@ -369,6 +374,14 @@ class HostTestCaseV21(test.TestCase):
         db.instance_destroy(ctxt, i_ref1['uuid'])
         db.instance_destroy(ctxt, i_ref2['uuid'])
 
+    def test_show_late_host_mapping_gone(self):
+        s_ref = self._create_compute_service()
+        with mock.patch.object(self.controller.api,
+                               'instance_get_all_by_host') as m:
+            m.side_effect = exception.HostMappingNotFound(name='something')
+            self.assertRaises(webob.exc.HTTPNotFound,
+                              self.controller.show, self.req, s_ref['host'])
+
     def test_list_hosts_with_zone(self):
         result = self.controller.index(FakeRequestWithNovaZone())
         self.assertIn('hosts', result)
@@ -402,3 +415,26 @@ class HostsPolicyEnforcementV21(test.NoDBTestCase):
         self.assertEqual(
             "Policy doesn't allow %s to be performed." % rule_name,
             exc.format_message())
+
+
+class HostControllerDeprecationTest(test.NoDBTestCase):
+
+    def setUp(self):
+        super(HostControllerDeprecationTest, self).setUp()
+        self.controller = os_hosts_v21.HostController()
+        self.req = fakes.HTTPRequest.blank('', version='2.43')
+
+    def test_not_found_for_all_host_api(self):
+        self.assertRaises(exception.VersionNotFoundForAPIMethod,
+                          self.controller.show, self.req, fakes.FAKE_UUID)
+        self.assertRaises(exception.VersionNotFoundForAPIMethod,
+                          self.controller.startup, self.req, fakes.FAKE_UUID)
+        self.assertRaises(exception.VersionNotFoundForAPIMethod,
+                          self.controller.shutdown, self.req, fakes.FAKE_UUID)
+        self.assertRaises(exception.VersionNotFoundForAPIMethod,
+                          self.controller.reboot, self.req, fakes.FAKE_UUID)
+        self.assertRaises(exception.VersionNotFoundForAPIMethod,
+                          self.controller.index, self.req)
+        self.assertRaises(exception.VersionNotFoundForAPIMethod,
+                          self.controller.update, self.req, fakes.FAKE_UUID,
+                          body={})

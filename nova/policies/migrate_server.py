@@ -22,15 +22,26 @@ POLICY_ROOT = 'os_compute_api:os-migrate-server:%s'
 
 
 migrate_server_policies = [
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'migrate',
-        check_str=base.RULE_ADMIN_API),
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'discoverable',
-        check_str=base.RULE_ANY),
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'migrate_live',
-        check_str=base.RULE_ADMIN_API),
+    policy.DocumentedRuleDefault(
+        POLICY_ROOT % 'migrate',
+        base.RULE_ADMIN_API,
+        "Cold migrate a server to a host",
+        [
+            {
+                'method': 'POST',
+                'path': '/servers/{server_id}/action (migrate)'
+            }
+        ]),
+    policy.DocumentedRuleDefault(
+        POLICY_ROOT % 'migrate_live',
+        base.RULE_ADMIN_API,
+        "Live migrate a server to a new host without a reboot",
+        [
+            {
+                'method': 'POST',
+                'path': '/servers/{server_id}/action (os-migrateLive)'
+            }
+        ]),
 ]
 
 

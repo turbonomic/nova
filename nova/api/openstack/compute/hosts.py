@@ -25,12 +25,12 @@ from nova.api.openstack import extensions
 from nova.api.openstack import wsgi
 from nova.api import validation
 from nova import compute
+from nova import context as nova_context
 from nova import exception
 from nova import objects
 from nova.policies import hosts as hosts_policies
 
 LOG = logging.getLogger(__name__)
-ALIAS = 'os-hosts'
 
 
 class HostController(wsgi.Controller):
@@ -39,6 +39,7 @@ class HostController(wsgi.Controller):
         self.api = compute.HostAPI()
         super(HostController, self).__init__()
 
+    @wsgi.Controller.api_version("2.1", "2.42")
     @extensions.expected_errors(())
     def index(self, req):
         """Returns a dict in the format
@@ -85,7 +86,7 @@ class HostController(wsgi.Controller):
         if zone:
             filters['availability_zone'] = zone
         services = self.api.service_get_all(context, filters=filters,
-                                            set_zones=True)
+                                            set_zones=True, all_cells=True)
         hosts = []
         api_services = ('nova-osapi_compute', 'nova-ec2', 'nova-metadata')
         for service in services:
@@ -95,6 +96,7 @@ class HostController(wsgi.Controller):
                               'zone': service['availability_zone']})
         return {'hosts': hosts}
 
+    @wsgi.Controller.api_version("2.1", "2.42")
     @extensions.expected_errors((400, 404, 501))
     @validation.schema(hosts.update)
     def update(self, req, id, body):
@@ -143,7 +145,7 @@ class HostController(wsgi.Controller):
             result = self.api.set_host_maintenance(context, host_name, mode)
         except NotImplementedError:
             common.raise_feature_not_supported()
-        except exception.HostNotFound as e:
+        except (exception.HostNotFound, exception.HostMappingNotFound) as e:
             raise webob.exc.HTTPNotFound(explanation=e.format_message())
         except exception.ComputeServiceUnavailable as e:
             raise webob.exc.HTTPBadRequest(explanation=e.format_message())
@@ -161,11 +163,10 @@ class HostController(wsgi.Controller):
         else:
             LOG.info("Disabling host %s.", host_name)
         try:
-            result = self.api.set_host_enabled(context, host_name=host_name,
-                                               enabled=enabled)
+            result = self.api.set_host_enabled(context, host_name, enabled)
         except NotImplementedError:
             common.raise_feature_not_supported()
-        except exception.HostNotFound as e:
+        except (exception.HostNotFound, exception.HostMappingNotFound) as e:
             raise webob.exc.HTTPNotFound(explanation=e.format_message())
         except exception.ComputeServiceUnavailable as e:
             raise webob.exc.HTTPBadRequest(explanation=e.format_message())
@@ -178,24 +179,26 @@ class HostController(wsgi.Controller):
         context = req.environ['nova.context']
         context.can(hosts_policies.BASE_POLICY_NAME)
         try:
-            result = self.api.host_power_action(context, host_name=host_name,
-                                                action=action)
+            result = self.api.host_power_action(context, host_name, action)
         except NotImplementedError:
             common.raise_feature_not_supported()
-        except exception.HostNotFound as e:
+        except (exception.HostNotFound, exception.HostMappingNotFound) as e:
             raise webob.exc.HTTPNotFound(explanation=e.format_message())
         except exception.ComputeServiceUnavailable as e:
             raise webob.exc.HTTPBadRequest(explanation=e.format_message())
         return {"host": host_name, "power_action": result}
 
+    @wsgi.Controller.api_version("2.1", "2.42")
     @extensions.expected_errors((400, 404, 501))
     def startup(self, req, id):
         return self._host_power_action(req, host_name=id, action="startup")
 
+    @wsgi.Controller.api_version("2.1", "2.42")
     @extensions.expected_errors((400, 404, 501))
     def shutdown(self, req, id):
         return self._host_power_action(req, host_name=id, action="shutdown")
 
+    @wsgi.Controller.api_version("2.1", "2.42")
     @extensions.expected_errors((400, 404, 501))
     def reboot(self, req, id):
         return self._host_power_action(req, host_name=id, action="reboot")
@@ -249,6 +252,7 @@ class HostController(wsgi.Controller):
                                     instance['ephemeral_gb'])
         return project_map
 
+    @wsgi.Controller.api_version("2.1", "2.42")
     @extensions.expected_errors(404)
     def show(self, req, id):
         """Shows the physical/usage resource given by hosts.
@@ -265,12 +269,15 @@ class HostController(wsgi.Controller):
         context.can(hosts_policies.BASE_POLICY_NAME)
         host_name = id
         try:
+            mapping = objects.HostMapping.get_by_host(context, host_name)
+            nova_context.set_target_cell(context, mapping.cell_mapping)
             compute_node = (
                 objects.ComputeNode.get_first_node_by_host_for_old_compat(
                     context, host_name))
-        except exception.ComputeHostNotFound as e:
+            instances = self.api.instance_get_all_by_host(context, host_name)
+        except (exception.ComputeHostNotFound,
+                exception.HostMappingNotFound) as e:
             raise webob.exc.HTTPNotFound(explanation=e.format_message())
-        instances = self.api.instance_get_all_by_host(context, host_name)
         resources = [self._get_total_resources(host_name, compute_node)]
         resources.append(self._get_used_now_resources(host_name,
                                                       compute_node))
@@ -281,21 +288,3 @@ class HostController(wsgi.Controller):
         for resource in six.itervalues(by_proj_resources):
             resources.append({'resource': resource})
         return {'host': resources}
-
-
-class Hosts(extensions.V21APIExtensionBase):
-    """Admin-only host administration."""
-
-    name = "Hosts"
-    alias = ALIAS
-    version = 1
-
-    def get_resources(self):
-        resources = [extensions.ResourceExtension(ALIAS,
-                HostController(),
-                member_actions={"startup": "GET", "shutdown": "GET",
-                        "reboot": "GET"})]
-        return resources
-
-    def get_controller_extensions(self):
-        return []

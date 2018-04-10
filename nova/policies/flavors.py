@@ -19,16 +19,15 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:flavors'
-POLICY_ROOT = 'os_compute_api:flavors:%s'
 
 
 flavors_policies = [
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'discoverable',
-        check_str=base.RULE_ANY),
+    # TODO(johngarbutt) this doesn't appear to be used in the code and
+    # as such should be removed.
     policy.RuleDefault(
         name=BASE_POLICY_NAME,
-        check_str=base.RULE_ADMIN_OR_OWNER),
+        check_str=base.RULE_ADMIN_OR_OWNER,
+        description='Deprecated in Pike and will be removed in next release'),
 ]
 
 

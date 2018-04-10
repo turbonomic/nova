@@ -76,11 +76,14 @@ class SchedulerReportClientTests(test.TestCase):
         self.instance_uuid = uuids.inst
         self.instance = objects.Instance(
             uuid=self.instance_uuid,
+            project_id = uuids.project,
+            user_id = uuids.user,
             flavor=objects.Flavor(root_gb=10,
                                   swap=1,
                                   ephemeral_gb=100,
                                   memory_mb=1024,
-                                  vcpus=2))
+                                  vcpus=2,
+                                  extra_specs={}))
 
     @mock.patch('nova.compute.utils.is_volume_backed_instance',
                 return_value=False)

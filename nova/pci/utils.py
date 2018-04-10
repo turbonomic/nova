@@ -45,11 +45,19 @@ def pci_device_prop_match(pci_dev, specs):
     b) Device with vendor_id as 0x10de and product_id as 0x10d8:
 
     [{"vendor_id":"8086", "product_id":"8259"},
-     {"vendor_id":"10de", "product_id":"10d8"}]
+     {"vendor_id":"10de", "product_id":"10d8",
+      "capabilities_network": ["rx", "tx", "tso", "gso"]}]
 
     """
     def _matching_devices(spec):
-        return all(pci_dev.get(k) == v for k, v in spec.items())
+        for k, v in spec.items():
+            pci_dev_v = pci_dev.get(k)
+            if isinstance(v, list) and isinstance(pci_dev_v, list):
+                if not all(x in pci_dev.get(k) for x in v):
+                    return False
+            elif pci_dev_v != v:
+                return False
+        return True
 
     return any(_matching_devices(spec) for spec in specs)
 
@@ -171,3 +179,27 @@ def get_vf_num_by_pci_address(pci_addr):
     if vf_num is None:
         raise exception.PciDeviceNotFoundById(id=pci_addr)
     return vf_num
+
+
+def get_net_name_by_vf_pci_address(vfaddress):
+    """Given the VF PCI address, returns the net device name.
+
+    Every VF is associated to a PCI network device. This function
+    returns the libvirt name given to this network device; e.g.:
+
+        <device>
+            <name>net_enp8s0f0_90_e2_ba_5e_a6_40</name>
+        ...
+
+    In the libvirt parser information tree, the network device stores the
+    network capabilities associated to this device.
+    """
+    try:
+        mac = get_mac_by_pci_address(vfaddress).split(':')
+        ifname = get_ifname_by_pci_address(vfaddress)
+        return ("net_%(ifname)s_%(mac)s" %
+                {'ifname': ifname, 'mac': '_'.join(mac)})
+    except Exception:
+        LOG.warning("No net device was found for VF %(vfaddress)s",
+                    {'vfaddress': vfaddress})
+        return

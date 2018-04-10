@@ -13,7 +13,6 @@
 
 import copy
 
-import jsonschema
 from oslo_db import exception as db_exc
 from oslo_serialization import jsonutils
 from oslo_utils import encodeutils
@@ -75,76 +74,23 @@ GET_RPS_SCHEMA_1_3['properties']['member_of'] = {
 # having some set of capacity for some resources. The query string is a
 # comma-delimited set of "$RESOURCE_CLASS_NAME:$AMOUNT" strings. The validation
 # of the string is left up to the helper code in the
-# _normalize_resources_qs_param() function below.
+# normalize_resources_qs_param() function.
 GET_RPS_SCHEMA_1_4 = copy.deepcopy(GET_RPS_SCHEMA_1_3)
 GET_RPS_SCHEMA_1_4['properties']['resources'] = {
     "type": "string"
 }
 
 
-def _normalize_resources_qs_param(qs):
-    """Given a query string parameter for resources, validate it meets the
-    expected format and return a dict of amounts, keyed by resource class name.
-
-    The expected format of the resources parameter looks like so:
-
-        $RESOURCE_CLASS_NAME:$AMOUNT,$RESOURCE_CLASS_NAME:$AMOUNT
-
-    So, if the user was looking for resource providers that had room for an
-    instance that will consume 2 vCPUs, 1024 MB of RAM and 50GB of disk space,
-    they would use the following query string:
-
-        ?resources=VCPU:2,MEMORY_MB:1024,DISK_GB:50
-
-    The returned value would be:
-
-        {
-            "VCPU": 2,
-            "MEMORY_MB": 1024,
-            "DISK_GB": 50,
-        }
-
-    :param qs: The value of the 'resources' query string parameter
-    :raises `webob.exc.HTTPBadRequest` if the parameter's value isn't in the
-            expected format.
-    """
-    result = {}
-    resource_tuples = qs.split(',')
-    for rt in resource_tuples:
-        try:
-            rc_name, amount = rt.split(':')
-        except ValueError:
-            msg = _('Badly formed resources parameter. Expected resources '
-                    'query string parameter in form: '
-                    '?resources=VCPU:2,MEMORY_MB:1024. Got: %s.')
-            msg = msg % rt
-            raise webob.exc.HTTPBadRequest(msg)
-        try:
-            amount = int(amount)
-        except ValueError:
-            msg = _('Requested resource %(resource_name)s expected positive '
-                    'integer amount. Got: %(amount)s.')
-            msg = msg % {
-                'resource_name': rc_name,
-                'amount': amount,
-            }
-            raise webob.exc.HTTPBadRequest(msg)
-        if amount < 1:
-            msg = _('Requested resource %(resource_name)s requires '
-                    'amount >= 1. Got: %(amount)d.')
-            msg = msg % {
-                'resource_name': rc_name,
-                'amount': amount,
-            }
-            raise webob.exc.HTTPBadRequest(msg)
-        result[rc_name] = amount
-    return result
-
-
 def _serialize_links(environ, resource_provider):
     url = util.resource_provider_url(environ, resource_provider)
     links = [{'rel': 'self', 'href': url}]
-    for rel in ('aggregates', 'inventories', 'usages'):
+    rel_types = ['inventories', 'usages']
+    want_version = environ[microversion.MICROVERSION_ENVIRON]
+    if want_version >= (1, 1):
+        rel_types.append('aggregates')
+    if want_version >= (1, 6):
+        rel_types.append('traits')
+    for rel in rel_types:
         links.append({'rel': rel, 'href': '%s/%s' % (url, rel)})
     return links
 
@@ -261,13 +207,8 @@ def list_resource_providers(req):
         schema = GET_RPS_SCHEMA_1_3
     if want_version >= (1, 4):
         schema = GET_RPS_SCHEMA_1_4
-    try:
-        jsonschema.validate(dict(req.GET), schema,
-                            format_checker=jsonschema.FormatChecker())
-    except jsonschema.ValidationError as exc:
-        raise webob.exc.HTTPBadRequest(
-            _('Invalid query string parameters: %(exc)s') %
-            {'exc': exc})
+
+    util.validate_query_params(req, schema)
 
     filters = {}
     for attr in ['uuid', 'name', 'member_of']:
@@ -291,7 +232,7 @@ def list_resource_providers(req):
                             {'uuid': aggr_uuid})
             filters[attr] = value
     if 'resources' in req.GET:
-        resources = _normalize_resources_qs_param(req.GET['resources'])
+        resources = util.normalize_resources_qs_param(req.GET['resources'])
         filters['resources'] = resources
     try:
         resource_providers = objects.ResourceProviderList.get_all_by_filters(

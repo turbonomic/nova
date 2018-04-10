@@ -52,7 +52,8 @@ class LibvirtNetVolumeDriverTestCase(
         self.assertEqual('network', tree.get('type'))
         self.assertEqual('sheepdog', tree.find('./source').get('protocol'))
         self.assertEqual(self.name, tree.find('./source').get('name'))
-        libvirt_driver.disconnect_volume(connection_info, "vde")
+        libvirt_driver.disconnect_volume(connection_info, "vde",
+                                         mock.sentinel.instance)
 
     def rbd_connection(self, volume):
         return {
@@ -79,7 +80,8 @@ class LibvirtNetVolumeDriverTestCase(
         self.assertIsNone(tree.find('./source/auth'))
         self.assertEqual('1048576', tree.find('./iotune/total_bytes_sec').text)
         self.assertEqual('500', tree.find('./iotune/read_iops_sec').text)
-        libvirt_driver.disconnect_volume(connection_info, "vde")
+        libvirt_driver.disconnect_volume(connection_info, "vde",
+                                         mock.sentinel.instance)
 
     def test_libvirt_rbd_driver_hosts(self):
         libvirt_driver = net.LibvirtNetVolumeDriver(self.fake_host)
@@ -95,7 +97,8 @@ class LibvirtNetVolumeDriverTestCase(
         found_hosts = tree.findall('./source/host')
         self.assertEqual(hosts, [host.get('name') for host in found_hosts])
         self.assertEqual(ports, [host.get('port') for host in found_hosts])
-        libvirt_driver.disconnect_volume(connection_info, "vde")
+        libvirt_driver.disconnect_volume(connection_info, "vde",
+                                         mock.sentinel.instance)
 
     def test_libvirt_rbd_driver_auth_enabled(self):
         libvirt_driver = net.LibvirtNetVolumeDriver(self.fake_host)
@@ -112,7 +115,8 @@ class LibvirtNetVolumeDriverTestCase(
         self.assertEqual(self.user, tree.find('./auth').get('username'))
         self.assertEqual(secret_type, tree.find('./auth/secret').get('type'))
         self.assertEqual(self.uuid, tree.find('./auth/secret').get('uuid'))
-        libvirt_driver.disconnect_volume(connection_info, "vde")
+        libvirt_driver.disconnect_volume(connection_info, "vde",
+                                         mock.sentinel.instance)
 
     def test_libvirt_rbd_driver_auth_enabled_flags(self):
         # The values from the cinder connection_info take precedence over
@@ -137,7 +141,41 @@ class LibvirtNetVolumeDriverTestCase(
         self.assertEqual(self.user, tree.find('./auth').get('username'))
         self.assertEqual(secret_type, tree.find('./auth/secret').get('type'))
         self.assertEqual(self.uuid, tree.find('./auth/secret').get('uuid'))
-        libvirt_driver.disconnect_volume(connection_info, "vde")
+        libvirt_driver.disconnect_volume(connection_info, "vde",
+                                         mock.sentinel.instance)
+
+    def test_libvirt_rbd_driver_auth_enabled_flags_secret_uuid_fallback(self):
+        """The values from the cinder connection_info take precedence over
+        nova.conf values, unless it's old connection data where the
+        secret_uuid wasn't set on the cinder side for the original connection
+        which is now persisted in the
+        nova.block_device_mappings.connection_info column and used here. In
+        this case we fallback to use the local config for secret_uuid.
+        """
+        libvirt_driver = net.LibvirtNetVolumeDriver(self.fake_host)
+        connection_info = self.rbd_connection(self.vol)
+        secret_type = 'ceph'
+        connection_info['data']['auth_enabled'] = True
+        connection_info['data']['auth_username'] = self.user
+        connection_info['data']['secret_type'] = secret_type
+        # Fake out cinder not setting the secret_uuid in the old connection.
+        connection_info['data']['secret_uuid'] = None
+
+        flags_uuid = '37152720-1785-11e2-a740-af0c1d8b8e4b'
+        flags_user = 'bar'
+        self.flags(rbd_user=flags_user,
+                   rbd_secret_uuid=flags_uuid,
+                   group='libvirt')
+
+        conf = libvirt_driver.get_config(connection_info, self.disk_info)
+        tree = conf.format_dom()
+        self._assertNetworkAndProtocolEquals(tree)
+        self.assertEqual(self.user, tree.find('./auth').get('username'))
+        self.assertEqual(secret_type, tree.find('./auth/secret').get('type'))
+        # Assert that the secret_uuid comes from CONF.libvirt.rbd_secret_uuid.
+        self.assertEqual(flags_uuid, tree.find('./auth/secret').get('uuid'))
+        libvirt_driver.disconnect_volume(connection_info, "vde",
+                                         mock.sentinel.instance)
 
     def test_libvirt_rbd_driver_auth_disabled(self):
         libvirt_driver = net.LibvirtNetVolumeDriver(self.fake_host)
@@ -152,7 +190,8 @@ class LibvirtNetVolumeDriverTestCase(
         tree = conf.format_dom()
         self._assertNetworkAndProtocolEquals(tree)
         self.assertIsNone(tree.find('./auth'))
-        libvirt_driver.disconnect_volume(connection_info, "vde")
+        libvirt_driver.disconnect_volume(connection_info, "vde",
+                                         mock.sentinel.instance)
 
     def test_libvirt_rbd_driver_auth_disabled_flags_override(self):
         libvirt_driver = net.LibvirtNetVolumeDriver(self.fake_host)
@@ -177,7 +216,8 @@ class LibvirtNetVolumeDriverTestCase(
         self.assertEqual(flags_user, tree.find('./auth').get('username'))
         self.assertEqual(secret_type, tree.find('./auth/secret').get('type'))
         self.assertEqual(flags_uuid, tree.find('./auth/secret').get('uuid'))
-        libvirt_driver.disconnect_volume(connection_info, "vde")
+        libvirt_driver.disconnect_volume(connection_info, "vde",
+                                         mock.sentinel.instance)
 
     @mock.patch.object(host.Host, 'find_secret')
     @mock.patch.object(host.Host, 'create_secret')
@@ -198,4 +238,5 @@ class LibvirtNetVolumeDriverTestCase(
         self.assertEqual(secret_type, tree.find('./auth/secret').get('type'))
         self.assertEqual(test_volume.SECRET_UUID,
                          tree.find('./auth/secret').get('uuid'))
-        libvirt_driver.disconnect_volume(connection_info, 'vde')
+        libvirt_driver.disconnect_volume(connection_info, 'vde',
+                                         mock.sentinel.instance)

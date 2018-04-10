@@ -23,10 +23,7 @@ from oslo_log import log as logging
 from oslo_utils import excutils
 from oslo_utils import importutils
 
-from nova.cloudpipe import pipelib
 import nova.conf
-from nova.i18n import _LI
-from nova.i18n import _LW
 import nova.virt.firewall as base_firewall
 from nova.virt import netutils
 
@@ -56,8 +53,8 @@ class NWFilterFirewall(base_firewall.FirewallDriver):
             try:
                 libvirt = importutils.import_module('libvirt')
             except ImportError:
-                LOG.warning(_LW("Libvirt module could not be loaded. "
-                             "NWFilterFirewall will not work correctly."))
+                LOG.warning("Libvirt module could not be loaded. "
+                            "NWFilterFirewall will not work correctly.")
         self._host = host
         self.static_filters_configured = False
 
@@ -110,10 +107,10 @@ class NWFilterFirewall(base_firewall.FirewallDriver):
 
     def setup_basic_filtering(self, instance, network_info):
         """Set up basic filtering (MAC, IP, and ARP spoofing protection)."""
-        LOG.info(_LI('Called setup_basic_filtering in nwfilter'),
+        LOG.info('Called setup_basic_filtering in nwfilter',
                  instance=instance)
 
-        LOG.info(_LI('Ensuring static filters'), instance=instance)
+        LOG.info('Ensuring static filters', instance=instance)
         self._ensure_static_filters()
 
         nodhcp_base_filter = self.get_base_filter_list(instance, False)
@@ -150,24 +147,21 @@ class NWFilterFirewall(base_firewall.FirewallDriver):
             if dhcp_server:
                 parameters.append(format_parameter('DHCPSERVER', dhcp_server))
 
+            ipv4_cidr = subnet['cidr']
+            net, mask = netutils.get_net_and_mask(ipv4_cidr)
+            parameters.append(format_parameter('PROJNET', net))
+            parameters.append(format_parameter('PROJMASK', mask))
+
         for subnet in v6_subnets:
             gateway = subnet.get('gateway')
             if gateway:
                 ra_server = gateway['address'] + "/128"
                 parameters.append(format_parameter('RASERVER', ra_server))
 
-        if CONF.allow_same_net_traffic:
-            for subnet in v4_subnets:
-                ipv4_cidr = subnet['cidr']
-                net, mask = netutils.get_net_and_mask(ipv4_cidr)
-                parameters.append(format_parameter('PROJNET', net))
-                parameters.append(format_parameter('PROJMASK', mask))
-
-            for subnet in v6_subnets:
-                ipv6_cidr = subnet['cidr']
-                net, prefix = netutils.get_net_and_prefixlen(ipv6_cidr)
-                parameters.append(format_parameter('PROJNET6', net))
-                parameters.append(format_parameter('PROJMASK6', prefix))
+            ipv6_cidr = subnet['cidr']
+            net, prefix = netutils.get_net_and_prefixlen(ipv6_cidr)
+            parameters.append(format_parameter('PROJNET6', net))
+            parameters.append(format_parameter('PROJMASK6', prefix))
 
         return parameters
 
@@ -193,9 +187,7 @@ class NWFilterFirewall(base_firewall.FirewallDriver):
         filters added to the list must also be correctly defined
         within the subclass.
         """
-        if pipelib.is_vpn_image(instance.image_ref):
-            base_filter = 'nova-vpn'
-        elif allow_dhcp:
+        if allow_dhcp:
             base_filter = 'nova-base'
         else:
             base_filter = 'nova-nodhcp'
@@ -221,8 +213,6 @@ class NWFilterFirewall(base_firewall.FirewallDriver):
         self._define_filter(self._filter_container('nova-nodhcp', filter_set))
         filter_set.append('allow-dhcp-server')
         self._define_filter(self._filter_container('nova-base', filter_set))
-        self._define_filter(self._filter_container('nova-vpn',
-                                                   ['allow-dhcp-server']))
         self._define_filter(self.nova_dhcp_filter())
 
         self.static_filters_configured = True
@@ -289,9 +279,8 @@ class NWFilterFirewall(base_firewall.FirewallDriver):
                     if errcode == libvirt.VIR_ERR_OPERATION_INVALID:
                         # This happens when the instance filter is still in use
                         # (ie. when the instance has not terminated properly)
-                        LOG.info(_LI('Failed to undefine network filter '
-                                     '%(name)s. Try %(cnt)d of '
-                                     '%(max_retry)d.'),
+                        LOG.info('Failed to undefine network filter '
+                                 '%(name)s. Try %(cnt)d of %(max_retry)d.',
                                  {'name': instance_filter_name,
                                   'cnt': cnt + 1,
                                   'max_retry': max_retry},
@@ -357,8 +346,8 @@ class IptablesFirewallDriver(base_firewall.IptablesFirewallDriver):
             self.iptables.apply()
             self.nwfilter.unfilter_instance(instance, network_info)
         else:
-            LOG.info(_LI('Attempted to unfilter instance which is not '
-                         'filtered'), instance=instance)
+            LOG.info('Attempted to unfilter instance which is not filtered',
+                     instance=instance)
 
     def instance_filter_exists(self, instance, network_info):
         """Check nova-instance-instance-xxx exists."""

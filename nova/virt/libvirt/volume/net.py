@@ -14,7 +14,7 @@ from oslo_log import log as logging
 
 import nova.conf
 from nova import exception
-from nova.i18n import _, _LW
+from nova.i18n import _
 from nova import utils
 from nova.virt.libvirt.volume import volume as libvirt_volume
 
@@ -62,17 +62,29 @@ class LibvirtNetVolumeDriver(libvirt_volume.LibvirtBaseVolumeDriver):
         auth_enabled = netdisk_properties.get('auth_enabled')
         if auth_enabled:
             conf.auth_username = netdisk_properties['auth_username']
-            conf.auth_secret_uuid = netdisk_properties['secret_uuid']
+            # We started preferring Cinder config for rbd auth values starting
+            # in Ocata, but if we have a guest connection from before that when
+            # secret_uuid wasn't configured in Cinder, we need to fallback to
+            # get it from local nova.conf.
+            if netdisk_properties['secret_uuid'] is not None:
+                conf.auth_secret_uuid = netdisk_properties['secret_uuid']
+            else:
+                LOG.debug('Falling back to Nova configuration for RBD auth '
+                          'secret_uuid value.')
+                conf.auth_secret_uuid = CONF.libvirt.rbd_secret_uuid
             # secret_type is always hard-coded to 'ceph' in cinder
             conf.auth_secret_type = netdisk_properties['secret_type']
         elif CONF.libvirt.rbd_secret_uuid:
             # Anyone relying on falling back to nova config is probably having
             # this work accidentally and we'll remove that support in the
             # 16.0.0 Pike release.
-            LOG.warning(_LW('Falling back to Nova configuration values for '
-                            'RBD authentication. Cinder should be configured '
-                            'for auth with Ceph volumes. This fallback will '
-                            'be dropped in the Nova 16.0.0 Pike release.'))
+            # NOTE(mriedem): We'll have to be extra careful about this in case
+            # the reason we got here is due to an old volume connection created
+            # before we started preferring the Cinder settings in Ocata.
+            LOG.warning('Falling back to Nova configuration values for '
+                        'RBD authentication. Cinder should be configured '
+                        'for auth with Ceph volumes. This fallback will '
+                        'be dropped in the Nova 16.0.0 Pike release.')
             # use the nova config values
             conf.auth_username = CONF.libvirt.rbd_user
             conf.auth_secret_uuid = CONF.libvirt.rbd_secret_uuid
@@ -115,8 +127,8 @@ class LibvirtNetVolumeDriver(libvirt_volume.LibvirtBaseVolumeDriver):
             self._set_auth_config_iscsi(conf, netdisk_properties)
         return conf
 
-    def disconnect_volume(self, connection_info, disk_dev):
+    def disconnect_volume(self, connection_info, disk_dev, instance):
         """Detach the volume from instance_name."""
         super(LibvirtNetVolumeDriver,
-              self).disconnect_volume(connection_info, disk_dev)
+              self).disconnect_volume(connection_info, disk_dev, instance)
         self._delete_secret_by_name(connection_info)

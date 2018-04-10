@@ -30,21 +30,16 @@ class MigrationTask(base.TaskBase):
         self.request_spec = request_spec
         self.reservations = reservations
         self.flavor = flavor
-        self.quotas = None
 
         self.compute_rpcapi = compute_rpcapi
         self.scheduler_client = scheduler_client
 
     def _execute(self):
-        self.quotas = objects.Quotas.from_reservations(self.context,
-                                                       self.reservations,
-                                                       instance=self.instance)
         # TODO(sbauza): Remove that once prep_resize() accepts a  RequestSpec
         # object in the signature and all the scheduler.utils methods too
         legacy_spec = self.request_spec.to_legacy_request_spec_dict()
         legacy_props = self.request_spec.to_legacy_filter_properties_dict()
-        scheduler_utils.setup_instance_group(self.context, legacy_spec,
-                                             legacy_props)
+        scheduler_utils.setup_instance_group(self.context, self.request_spec)
         scheduler_utils.populate_retry(legacy_props,
                                        self.instance.uuid)
 
@@ -69,8 +64,9 @@ class MigrationTask(base.TaskBase):
             self.request_spec.requested_destination = objects.Destination(
                 cell=instance_mapping.cell_mapping)
 
+        self.request_spec.ensure_project_id(self.instance)
         hosts = self.scheduler_client.select_destinations(
-            self.context, self.request_spec)
+            self.context, self.request_spec, [self.instance.uuid])
         host_state = hosts[0]
 
         scheduler_utils.populate_filter_properties(legacy_props,
@@ -97,5 +93,4 @@ class MigrationTask(base.TaskBase):
             node=node, clean_shutdown=self.clean_shutdown)
 
     def rollback(self):
-        if self.quotas:
-            self.quotas.rollback()
+        pass

@@ -18,11 +18,11 @@ import mock
 import webob
 
 from nova.api.openstack.compute import quota_sets as quotas_v21
-from nova.api.openstack.compute import tenant_networks
 from nova import db
 from nova import exception
 from nova import quota
 from nova import test
+from nova.tests import fixtures as nova_fixtures
 from nova.tests.unit.api.openstack import fakes
 
 
@@ -40,6 +40,14 @@ def quota_set(id, include_server_group_quotas=True):
 
 
 class BaseQuotaSetsTest(test.TestCase):
+
+    def setUp(self):
+        super(BaseQuotaSetsTest, self).setUp()
+        # We need to stub out verify_project_id so that it doesn't
+        # generate an EndpointNotFound exception and result in a
+        # server error.
+        self.stub_out('nova.api.openstack.identity.verify_project_id',
+                      lambda ctx, project_id: True)
 
     def get_delete_status_int(self, res):
         # NOTE: on v2.1, http status code is set as wsgi_code of API
@@ -283,10 +291,9 @@ class QuotaSetsTestV21(BaseQuotaSetsTest):
 
     def test_update_network_quota_enabled(self):
         self.flags(enable_network_quota=True)
-        tenant_networks._register_network_quota()
+        self.useFixture(nova_fixtures.RegisterNetworkQuota())
         self.controller.update(self._get_http_request(),
                                1234, body={'quota_set': {'networks': 1}})
-        del quota.QUOTAS._resources['networks']
 
 
 class ExtendedQuotasTestV21(BaseQuotaSetsTest):
@@ -531,8 +538,14 @@ class QuotaSetsTestV236(test.NoDBTestCase):
 
     def setUp(self):
         super(QuotaSetsTestV236, self).setUp()
+        # We need to stub out verify_project_id so that it doesn't
+        # generate an EndpointNotFound exception and result in a
+        # server error.
+        self.stub_out('nova.api.openstack.identity.verify_project_id',
+                      lambda ctx, project_id: True)
+
         self.flags(enable_network_quota=True)
-        tenant_networks._register_network_quota()
+        self.useFixture(nova_fixtures.RegisterNetworkQuota())
         self.old_req = fakes.HTTPRequest.blank('', version='2.1')
         self.filtered_quotas = ['fixed_ips', 'floating_ips', 'networks',
             'security_group_rules', 'security_groups']
@@ -572,10 +585,6 @@ class QuotaSetsTestV236(test.NoDBTestCase):
         }
         self.controller = quotas_v21.QuotaSetsController()
         self.req = fakes.HTTPRequest.blank('', version='2.36')
-        self.addCleanup(self._remove_network_quota)
-
-    def _remove_network_quota(self):
-        del quota.QUOTAS._resources['networks']
 
     def _ensure_filtered_quotas_existed_in_old_api(self):
         res_dict = self.controller.show(self.old_req, 1234)

@@ -55,38 +55,23 @@ class MigrationTaskTestCase(test.NoDBTestCase):
                                      scheduler_client.SchedulerClient())
 
     @mock.patch('nova.availability_zones.get_host_availability_zone')
-    @mock.patch.object(objects.RequestSpec, 'from_components')
     @mock.patch.object(scheduler_utils, 'setup_instance_group')
     @mock.patch.object(scheduler_client.SchedulerClient, 'select_destinations')
     @mock.patch.object(compute_rpcapi.ComputeAPI, 'prep_resize')
-    @mock.patch.object(objects.Quotas, 'from_reservations')
-    def test_execute(self, quotas_mock, prep_resize_mock,
-                     sel_dest_mock, sig_mock, request_spec_from_components,
-                     az_mock):
+    def test_execute(self, prep_resize_mock, sel_dest_mock, sig_mock, az_mock):
         sel_dest_mock.return_value = self.hosts
         az_mock.return_value = 'myaz'
         task = self._generate_task()
-        request_spec_from_components.return_value = self.request_spec
         legacy_request_spec = self.request_spec.to_legacy_request_spec_dict()
         task.execute()
 
-        quotas_mock.assert_called_once_with(self.context, self.reservations,
-                                            instance=self.instance)
-        sig_mock.assert_called_once_with(self.context, legacy_request_spec,
-                                         self.filter_properties)
+        sig_mock.assert_called_once_with(self.context, self.request_spec)
         task.scheduler_client.select_destinations.assert_called_once_with(
-            self.context, self.request_spec)
+            self.context, self.request_spec, [self.instance.uuid])
         prep_resize_mock.assert_called_once_with(
             self.context, self.instance, legacy_request_spec['image'],
             self.flavor, self.hosts[0]['host'], self.reservations,
             request_spec=legacy_request_spec,
             filter_properties=self.filter_properties,
             node=self.hosts[0]['nodename'], clean_shutdown=self.clean_shutdown)
-        self.assertFalse(quotas_mock.return_value.rollback.called)
         az_mock.assert_called_once_with(self.context, 'host1')
-
-    def test_rollback(self):
-        task = self._generate_task()
-        task.quotas = mock.MagicMock()
-        task.rollback()
-        task.quotas.rollback.assert_called_once_with()

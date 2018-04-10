@@ -124,6 +124,16 @@ class InstanceMetadata(object):
 
         ctxt = context.get_admin_context()
 
+        # NOTE(danms): Sanitize the instance to limit the amount of stuff
+        # inside that may not pickle well (i.e. context). We also touch
+        # some of the things we'll lazy load later to make sure we keep their
+        # values in what we cache.
+        instance.ec2_ids
+        instance.keypairs
+        instance.device_metadata
+        instance = objects.Instance.obj_from_primitive(
+            instance.obj_to_primitive())
+
         # The default value of mimeType is set to MIME_TYPE_TEXT_PLAIN
         self.set_mimetype(MIME_TYPE_TEXT_PLAIN)
         self.instance = instance
@@ -333,9 +343,14 @@ class InstanceMetadata(object):
         if self.instance.key_name:
             if cells_opts.get_cell_type() == 'compute':
                 cells_api = cells_rpcapi.CellsAPI()
-                keypair = cells_api.get_keypair_at_top(
-                  context.get_admin_context(), self.instance.user_id,
-                  self.instance.key_name)
+                try:
+                    keypair = cells_api.get_keypair_at_top(
+                      context.get_admin_context(), self.instance.user_id,
+                      self.instance.key_name)
+                except exception.KeypairNotFound:
+                    # NOTE(lpigueir): If keypair was deleted, treat
+                    # it like it never had any
+                    keypair = None
             else:
                 keypairs = self.instance.keypairs
                 # NOTE(mriedem): It's possible for the keypair to be deleted
@@ -403,6 +418,8 @@ class InstanceMetadata(object):
                         bus = 'scsi'
                     elif isinstance(device.bus, metadata_obj.IDEDeviceBus):
                         bus = 'ide'
+                    elif isinstance(device.bus, metadata_obj.XenDeviceBus):
+                        bus = 'xen'
                     else:
                         LOG.debug('Metadata for device with unknown bus %s '
                                   'has not been included in the '
@@ -686,8 +703,8 @@ def get_metadata_by_instance_id(instance_id, address, ctxt=None):
                                                 expected_attrs=attrs)
         return InstanceMetadata(instance, address)
 
-    with context.target_cell(ctxt, im.cell_mapping):
-        instance = objects.Instance.get_by_uuid(ctxt, instance_id,
+    with context.target_cell(ctxt, im.cell_mapping) as cctxt:
+        instance = objects.Instance.get_by_uuid(cctxt, instance_id,
                                                 expected_attrs=attrs)
         return InstanceMetadata(instance, address)
 

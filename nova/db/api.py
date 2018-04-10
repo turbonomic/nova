@@ -32,7 +32,6 @@ from oslo_log import log as logging
 
 from nova.cells import rpcapi as cells_rpcapi
 import nova.conf
-from nova.i18n import _LE
 
 
 CONF = nova.conf.CONF
@@ -110,6 +109,13 @@ def service_destroy(context, service_id):
 def service_get(context, service_id):
     """Get a service or raise if it does not exist."""
     return IMPL.service_get(context, service_id)
+
+
+def service_get_by_uuid(context, service_uuid):
+    """Get a service by it's uuid or raise ServiceNotFound if it does not
+    exist.
+    """
+    return IMPL.service_get_by_uuid(context, service_uuid)
 
 
 def service_get_minimum_version(context, binary):
@@ -252,6 +258,19 @@ def compute_node_get_all(context):
     :returns: List of dictionaries each containing compute node properties
     """
     return IMPL.compute_node_get_all(context)
+
+
+def compute_node_get_all_mapped_less_than(context, mapped_less_than):
+    """Get all ComputeNode objects with specific mapped values.
+
+    :param context: The security context
+    :param mapped_less_than: Get compute nodes with mapped less than this
+                             value
+
+    :returns: List of dictionaries each containing compute node properties
+    """
+    return IMPL.compute_node_get_all_mapped_less_than(context,
+                                                      mapped_less_than)
 
 
 def compute_node_get_all_by_pagination(context, limit=None, marker=None):
@@ -1767,7 +1786,7 @@ def bw_usage_update(context, uuid, mac, start_period, bw_in, bw_out,
                     uuid, mac, start_period, bw_in, bw_out,
                     last_ctr_in, last_ctr_out, last_refreshed)
         except Exception:
-            LOG.exception(_LE("Failed to notify cells of bw_usage update"))
+            LOG.exception("Failed to notify cells of bw_usage update")
     return rv
 
 
@@ -2044,12 +2063,8 @@ def pcidevice_online_data_migration(context, max_count):
     return IMPL.pcidevice_online_data_migration(context, max_count)
 
 
-def aggregate_uuids_online_data_migration(context, max_count):
-    return IMPL.aggregate_uuids_online_data_migration(context, max_count)
-
-
-def computenode_uuids_online_data_migration(context, max_count):
-    return IMPL.computenode_uuids_online_data_migration(context, max_count)
+def service_uuids_online_data_migration(context, max_count):
+    return IMPL.service_uuids_online_data_migration(context, max_count)
 
 
 ####################

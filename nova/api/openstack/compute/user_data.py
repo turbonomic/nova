@@ -13,32 +13,18 @@
 #    under the License.
 
 from nova.api.openstack.compute.schemas import user_data as schema_user_data
-from nova.api.openstack import extensions
 
 
-ALIAS = "os-user-data"
 ATTRIBUTE_NAME = 'user_data'
 
 
-class UserData(extensions.V21APIExtensionBase):
-    """Add user_data to the Create Server API."""
+# NOTE(gmann): This function is not supposed to use 'body_deprecated_param'
+# parameter as this is placed to handle scheduler_hint extension for V2.1.
+def server_create(server_dict, create_kwargs, body_deprecated_param):
+    create_kwargs['user_data'] = server_dict.get(ATTRIBUTE_NAME)
 
-    name = "UserData"
-    alias = ALIAS
-    version = 1
 
-    def get_controller_extensions(self):
-        return []
-
-    def get_resources(self):
-        return []
-
-    # NOTE(gmann): This function is not supposed to use 'body_deprecated_param'
-    # parameter as this is placed to handle scheduler_hint extension for V2.1.
-    def server_create(self, server_dict, create_kwargs, body_deprecated_param):
-        create_kwargs['user_data'] = server_dict.get(ATTRIBUTE_NAME)
-
-    def get_server_create_schema(self, version):
-        if version == '2.0':
-            return schema_user_data.server_create_v20
-        return schema_user_data.server_create
+def get_server_create_schema(version):
+    if version == '2.0':
+        return schema_user_data.server_create_v20
+    return schema_user_data.server_create

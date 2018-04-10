@@ -19,6 +19,8 @@ Management class for host-related functions (start, reboot, etc).
 
 import re
 
+from os_xenapi.client import host_management
+from os_xenapi.client import XenAPI
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
@@ -28,7 +30,7 @@ from nova.compute import task_states
 from nova.compute import vm_states
 from nova import context
 from nova import exception
-from nova.i18n import _, _LE, _LI, _LW
+from nova.i18n import _
 from nova import objects
 from nova.objects import fields as obj_fields
 from nova.virt.xenapi import pool_states
@@ -71,11 +73,11 @@ class Host(object):
                         name = vm_rec['name_label']
                         uuid = _uuid_find(ctxt, host, name)
                         if not uuid:
-                            LOG.info(_LI('Instance %(name)s running on '
-                                         '%(host)s could not be found in '
-                                         'the database: assuming it is a '
-                                         'worker VM and skip ping migration '
-                                         'to a new host'),
+                            LOG.info('Instance %(name)s running on '
+                                     '%(host)s could not be found in '
+                                     'the database: assuming it is a '
+                                     'worker VM and skip ping migration '
+                                     'to a new host',
                                      {'name': name, 'host': host})
                             continue
                     instance = objects.Instance.get_by_uuid(ctxt, uuid)
@@ -102,9 +104,9 @@ class Host(object):
                     instance.save()
 
                     break
-                except self._session.XenAPI.Failure:
-                    LOG.exception(_LE('Unable to migrate VM %(vm_ref)s '
-                                      'from %(host)s'),
+                except XenAPI.Failure:
+                    LOG.exception(_('Unable to migrate VM %(vm_ref)s '
+                                    'from %(host)s'),
                                   {'vm_ref': vm_ref, 'host': host})
                     instance.host = host
                     instance.vm_state = vm_states.ACTIVE
@@ -113,8 +115,8 @@ class Host(object):
         if vm_counter == migrations_counter:
             return 'on_maintenance'
         else:
-            raise exception.NoValidHost(reason='Unable to find suitable '
-                                                   'host for VMs evacuation')
+            raise exception.NoValidHost(reason=_('Unable to find suitable '
+                                                 'host for VMs evacuation'))
 
     def set_host_enabled(self, enabled):
         """Sets the compute host's ability to accept new instances."""
@@ -127,13 +129,15 @@ class Host(object):
         service.disabled_reason = 'set by xenapi host_state'
         service.save()
 
-        args = {"enabled": jsonutils.dumps(enabled)}
-        response = call_xenhost(self._session, "set_host_enabled", args)
+        response = _call_host_management(self._session,
+                                         host_management.set_host_enabled,
+                                         jsonutils.dumps(enabled))
         return response.get("status", response)
 
     def get_host_uptime(self):
         """Returns the result of calling "uptime" on the target host."""
-        response = call_xenhost(self._session, "host_uptime", {})
+        response = _call_host_management(self._session,
+                                         host_management.get_host_uptime)
         return response.get("uptime", response)
 
 
@@ -185,8 +189,7 @@ class HostState(object):
                     _("Failed to parse information about"
                       " a pci device for passthrough"))
 
-            type_pci = self._session.call_plugin_serialized(
-                'xenhost.py', 'get_pci_type', slot_id[0])
+            type_pci = host_management.get_pci_type(self._session, slot_id[0])
 
             return {'label': '_'.join(['label',
                                        vendor_id[0],
@@ -200,8 +203,8 @@ class HostState(object):
 
         # Devices are separated by a blank line. That is why we
         # use "\n\n" as separator.
-        lspci_out = self._session.call_plugin_serialized(
-            'xenhost.py', 'get_pci_device_details')
+        lspci_out = host_management.get_pci_device_details(self._session)
+
         pci_list = lspci_out.split("\n\n")
 
         # For each device of the list, check if it uses the pciback
@@ -225,20 +228,59 @@ class HostState(object):
             self.update_status()
         return self._stats
 
+    def get_disk_used(self, sr_ref):
+        """Since glance images are downloaded and snapshotted before they are
+        used, only a small proportion of its VDI will be in use and it will
+        never grow.  We only need to count the virtual size for disks that
+        are attached to a VM - every other disk can count physical.
+        """
+
+        def _vdi_attached(vdi_ref):
+            try:
+                vbds = self._session.VDI.get_VBDs(vdi_ref)
+                for vbd in vbds:
+                    if self._session.VBD.get_currently_attached(vbd):
+                        return True
+            except self._session.XenAPI.Failure:
+                # VDI or VBD may no longer exist - in which case, it's
+                # not attached
+                pass
+            return False
+
+        allocated = 0
+        physical_used = 0
+
+        all_vdis = self._session.SR.get_VDIs(sr_ref)
+        for vdi_ref in all_vdis:
+            try:
+                vdi_physical = \
+                    int(self._session.VDI.get_physical_utilisation(vdi_ref))
+                if _vdi_attached(vdi_ref):
+                    allocated += \
+                        int(self._session.VDI.get_virtual_size(vdi_ref))
+                else:
+                    allocated += vdi_physical
+                physical_used += vdi_physical
+            except (ValueError, self._session.XenAPI.Failure):
+                LOG.exception(_('Unable to get size for vdi %s'), vdi_ref)
+
+        return (allocated, physical_used)
+
     def update_status(self):
         """Since under Xenserver, a compute node runs on a given host,
         we can get host status information using xenapi.
         """
         LOG.debug("Updating host stats")
-        data = call_xenhost(self._session, "host_data", {})
+        data = _call_host_management(self._session,
+                                     host_management.get_host_data)
         if data:
             sr_ref = vm_utils.scan_default_sr(self._session)
             sr_rec = self._session.SR.get_record(sr_ref)
             total = int(sr_rec["physical_size"])
-            used = int(sr_rec["physical_utilisation"])
+            (allocated, used) = self.get_disk_used(sr_ref)
             data["disk_total"] = total
             data["disk_used"] = used
-            data["disk_allocated"] = int(sr_rec["virtual_allocation"])
+            data["disk_allocated"] = allocated
             data["disk_available"] = total - used
             data["supported_instances"] = to_supported_instances(
                 data.get("host_capabilities")
@@ -256,8 +298,8 @@ class HostState(object):
                 del data['host_memory']
             if (data['host_hostname'] !=
                     self._stats.get('host_hostname', data['host_hostname'])):
-                LOG.error(_LE('Hostname has changed from %(old)s to %(new)s. '
-                              'A restart is required to take effect.'),
+                LOG.error('Hostname has changed from %(old)s to %(new)s. '
+                          'A restart is required to take effect.',
                           {'old': self._stats['host_hostname'],
                            'new': data['host_hostname']})
                 data['host_hostname'] = self._stats['host_hostname']
@@ -288,7 +330,7 @@ def to_supported_instances(host_capabilities):
 
             result.append((guestarch, obj_fields.HVType.XEN, ostype))
         except ValueError:
-            LOG.warning(_LW("Failed to extract instance support from %s"),
+            LOG.warning("Failed to extract instance support from %s",
                         capability)
 
     return result
@@ -359,11 +401,31 @@ def call_xenhost(session, method, arg_dict):
             return ''
         return jsonutils.loads(result)
     except ValueError:
-        LOG.exception(_LE("Unable to get updated status"))
+        LOG.exception(_("Unable to get updated status"))
         return None
     except session.XenAPI.Failure as e:
-        LOG.error(_LE("The call to %(method)s returned "
-                      "an error: %(e)s."), {'method': method, 'e': e})
+        LOG.error("The call to %(method)s returned "
+                  "an error: %(e)s.", {'method': method, 'e': e})
+        return e.details[1]
+
+
+def _call_host_management(session, method, *args):
+    """There will be several methods that will need this general
+    handling for interacting with the dom0 plugin, so this abstracts
+    out that behavior. the call_xenhost will be removed once we deprecated
+    those functions which are not needed anymore
+    """
+    try:
+        result = method(session, *args)
+        if not result:
+            return ''
+        return jsonutils.loads(result)
+    except ValueError:
+        LOG.exception(_("Unable to get updated status"))
+        return None
+    except session.XenAPI.Failure as e:
+        LOG.error("The call to %(method)s returned an error: %(e)s.",
+                  {'method': method.__name__, 'e': e})
         return e.details[1]
 
 

@@ -122,8 +122,15 @@ def fake_instance_obj(context, obj_instance_class=None, **updates):
                obj_instance_class(), fake_db_instance(**updates),
                expected_attrs=expected_attrs)
     inst.keypairs = objects.KeyPairList(objects=[])
+    inst.tags = objects.TagList()
     if flavor:
         inst.flavor = flavor
+        # This is needed for instance quota counting until we have the
+        # ability to count allocations in placement.
+        if 'vcpus' in flavor and 'vcpus' not in updates:
+            inst.vcpus = flavor.vcpus
+        if 'memory_mb' in flavor and 'memory_mb' not in updates:
+            inst.memory_mb = flavor.memory_mb
     inst.old_flavor = None
     inst.new_flavor = None
     inst.obj_reset_changes()

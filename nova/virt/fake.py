@@ -25,6 +25,7 @@ semantics of real hypervisor connections.
 
 import collections
 import contextlib
+import copy
 
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
@@ -32,12 +33,13 @@ from oslo_utils import versionutils
 
 from nova.compute import power_state
 from nova.compute import task_states
+from nova.compute import vm_states
 import nova.conf
 from nova.console import type as ctype
 from nova import exception
-from nova.i18n import _LW
+from nova.objects import diagnostics as diagnostics_obj
 from nova.objects import fields as obj_fields
-from nova.virt import diagnostics
+from nova.objects import migrate_data
 from nova.virt import driver
 from nova.virt import hardware
 from nova.virt import virtapi
@@ -121,7 +123,11 @@ class FakeDriver(driver.ComputeDriver):
     capabilities = {
         "has_imagecache": True,
         "supports_recreate": True,
-        "supports_migrate_to_same_host": True
+        "supports_migrate_to_same_host": True,
+        "supports_attach_interface": True,
+        "supports_tagged_attach_interface": True,
+        "supports_tagged_attach_volume": True,
+        "supports_extend_volume": True,
         }
 
     # Since we don't have a real hypervisor, pretend we have lots of
@@ -154,8 +160,12 @@ class FakeDriver(driver.ComputeDriver):
         self._mounts = {}
         self._interfaces = {}
         self.active_migrations = {}
+        self._nodes = self._init_nodes()
+
+    def _init_nodes(self):
         if not _FAKE_NODES:
             set_nodes([CONF.host])
+        return copy.copy(_FAKE_NODES)
 
     def init_host(self, host):
         return
@@ -264,7 +274,7 @@ class FakeDriver(driver.ComputeDriver):
         pass
 
     def destroy(self, context, instance, network_info, block_device_info=None,
-                destroy_disks=True, migrate_data=None):
+                destroy_disks=True):
         key = instance.uuid
         if key in self.instances:
             flavor = instance.flavor
@@ -274,7 +284,7 @@ class FakeDriver(driver.ComputeDriver):
                 disk=flavor.root_gb)
             del self.instances[key]
         else:
-            LOG.warning(_LW("Key '%(key)s' not in instances '%(inst)s'"),
+            LOG.warning("Key '%(key)s' not in instances '%(inst)s'",
                         {'key': key,
                          'inst': self.instances}, instance=instance)
 
@@ -305,6 +315,10 @@ class FakeDriver(driver.ComputeDriver):
         if instance_name not in self._mounts:
             self._mounts[instance_name] = {}
         self._mounts[instance_name][mountpoint] = new_connection_info
+
+    def extend_volume(self, connection_info, instance):
+        """Extend the disk attached to the instance."""
+        pass
 
     def attach_interface(self, context, instance, image_meta, vif):
         if vif['id'] in self._interfaces:
@@ -348,20 +362,28 @@ class FakeDriver(driver.ComputeDriver):
         }
 
     def get_instance_diagnostics(self, instance):
-        diags = diagnostics.Diagnostics(state='running', driver='fake',
-                hypervisor_os='fake-os', uptime=46664, config_drive=True)
-        diags.add_cpu(time=17300000000)
+        diags = diagnostics_obj.Diagnostics(
+            state='running', driver='libvirt', hypervisor='kvm',
+            hypervisor_os='ubuntu', uptime=46664, config_drive=True)
+        diags.add_cpu(id=0, time=17300000000, utilisation=15)
         diags.add_nic(mac_address='01:23:45:67:89:ab',
-                      rx_packets=26701,
                       rx_octets=2070139,
+                      rx_errors=100,
+                      rx_drop=200,
+                      rx_packets=26701,
+                      rx_rate=300,
                       tx_octets=140208,
-                      tx_packets = 662)
-        diags.add_disk(id='fake-disk-id',
-                       read_bytes=262144,
+                      tx_errors=400,
+                      tx_drop=500,
+                      tx_packets = 662,
+                      tx_rate=600)
+        diags.add_disk(read_bytes=262144,
                        read_requests=112,
                        write_bytes=5778432,
-                       write_requests=488)
-        diags.memory_details.maximum = 524288
+                       write_requests=488,
+                       errors_count=1)
+        diags.memory_details = diagnostics_obj.MemoryDiagnostics(
+            maximum=524288, used=0)
         return diags
 
     def get_all_bw_counters(self, instances):
@@ -451,7 +473,7 @@ class FakeDriver(driver.ComputeDriver):
                 'sockets': 4,
                 }),
             ])
-        if nodename not in _FAKE_NODES:
+        if nodename not in self._nodes:
             return {}
 
         host_status = self.host_status_base.copy()
@@ -489,11 +511,27 @@ class FakeDriver(driver.ComputeDriver):
                                            src_compute_info, dst_compute_info,
                                            block_migration=False,
                                            disk_over_commit=False):
-        return {}
+        data = migrate_data.LibvirtLiveMigrateData()
+        data.filename = 'fake'
+        data.image_type = CONF.libvirt.images_type
+        data.graphics_listen_addr_vnc = CONF.vnc.vncserver_listen
+        data.graphics_listen_addr_spice = CONF.spice.server_listen
+        data.serial_listen_addr = None
+        # Notes(eliqiao): block_migration and disk_over_commit are not
+        # nullable, so just don't set them if they are None
+        if block_migration is not None:
+            data.block_migration = block_migration
+        if disk_over_commit is not None:
+            data.disk_over_commit = disk_over_commit
+        data.disk_available_mb = 100000
+        data.is_shared_block_storage = True
+        data.is_shared_instance_path = True
+
+        return data
 
     def check_can_live_migrate_source(self, context, instance,
                                       dest_check_data, block_device_info=None):
-        return
+        return dest_check_data
 
     def finish_migration(self, context, migration, instance, disk_info,
                          network_info, image_meta, resize_instance,
@@ -505,7 +543,7 @@ class FakeDriver(driver.ComputeDriver):
 
     def pre_live_migration(self, context, instance, block_device_info,
                            network_info, disk_info, migrate_data):
-        return
+        return migrate_data
 
     def unfilter_instance(self, instance, network_info):
         return
@@ -538,7 +576,7 @@ class FakeDriver(driver.ComputeDriver):
                 'host': 'fakehost'}
 
     def get_available_nodes(self, refresh=False):
-        return _FAKE_NODES
+        return self._nodes
 
     def instance_on_disk(self, instance):
         return False
@@ -569,3 +607,58 @@ class SmallFakeDriver(FakeDriver):
     vcpus = 1
     memory_mb = 8192
     local_gb = 1028
+
+
+class MediumFakeDriver(FakeDriver):
+    # Fake driver that has enough resources to host more than one instance
+    # but not that much that cannot be exhausted easily
+
+    vcpus = 10
+    memory_mb = 8192
+    local_gb = 1028
+
+
+class FakeRescheduleDriver(FakeDriver):
+    """FakeDriver derivative that triggers a reschedule on the first spawn
+    attempt. This is expected to only be used in tests that have more than
+    one compute service.
+    """
+    # dict, keyed by instance uuid, mapped to a boolean telling us if the
+    # instance has been rescheduled or not
+    rescheduled = {}
+
+    def spawn(self, context, instance, image_meta, injected_files,
+              admin_password, network_info=None, block_device_info=None):
+        if not self.rescheduled.get(instance.uuid, False):
+            # We only reschedule on the first time something hits spawn().
+            self.rescheduled[instance.uuid] = True
+            raise exception.ComputeResourcesUnavailable(
+                reason='FakeRescheduleDriver')
+        super(FakeRescheduleDriver, self).spawn(
+            context, instance, image_meta, injected_files,
+            admin_password, network_info, block_device_info)
+
+
+class FakeBuildAbortDriver(FakeDriver):
+    """FakeDriver derivative that always fails on spawn() with a
+    BuildAbortException so no reschedule is attempted.
+    """
+    def spawn(self, context, instance, image_meta, injected_files,
+              admin_password, network_info=None, block_device_info=None):
+        raise exception.BuildAbortException(
+            instance_uuid=instance.uuid, reason='FakeBuildAbortDriver')
+
+
+class FakeUnshelveSpawnFailDriver(FakeDriver):
+    """FakeDriver derivative that always fails on spawn() with a
+    VirtualInterfaceCreateException when unshelving an offloaded instance.
+    """
+    def spawn(self, context, instance, image_meta, injected_files,
+              admin_password, network_info=None, block_device_info=None):
+        if instance.vm_state == vm_states.SHELVED_OFFLOADED:
+            raise exception.VirtualInterfaceCreateException(
+                'FakeUnshelveSpawnFailDriver')
+        # Otherwise spawn normally during the initial build.
+        super(FakeUnshelveSpawnFailDriver, self).spawn(
+            context, instance, image_meta, injected_files,
+            admin_password, network_info, block_device_info)

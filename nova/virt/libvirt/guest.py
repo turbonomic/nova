@@ -40,8 +40,6 @@ import six
 from nova.compute import power_state
 from nova import exception
 from nova.i18n import _
-from nova.i18n import _LE
-from nova.i18n import _LW
 from nova import utils
 from nova.virt import hardware
 from nova.virt.libvirt import compat
@@ -127,7 +125,7 @@ class Guest(object):
             guest = host.write_instance_config(xml)
         except Exception:
             with excutils.save_and_reraise_exception():
-                LOG.error(_LE('Error defining a guest with XML: %s'),
+                LOG.error('Error defining a guest with XML: %s',
                           encodeutils.safe_decode(xml))
         return guest
 
@@ -141,8 +139,8 @@ class Guest(object):
             return self._domain.createWithFlags(flags)
         except Exception:
             with excutils.save_and_reraise_exception():
-                LOG.error(_LE('Error launching a defined domain '
-                              'with XML: %s'),
+                LOG.error('Error launching a defined domain '
+                          'with XML: %s',
                           self._encoded_xml, errors='ignore')
 
     def poweroff(self):
@@ -177,7 +175,7 @@ class Guest(object):
                 LOG.debug('Failed to set time: agent not configured',
                           instance_uuid=self.uuid)
             else:
-                LOG.warning(_LW('Failed to set time: %(reason)s'),
+                LOG.warning('Failed to set time: %(reason)s',
                             {'reason': e}, instance_uuid=self.uuid)
         except Exception as ex:
             # The highest priority is not to let this method crash and thus
@@ -210,7 +208,7 @@ class Guest(object):
                     check_exit_code=[0, 1])
         except Exception:
             with excutils.save_and_reraise_exception():
-                LOG.error(_LE('Error enabling hairpin mode with XML: %s'),
+                LOG.error('Error enabling hairpin mode with XML: %s',
                           self._encoded_xml, errors='ignore')
 
     def get_interfaces(self):
@@ -371,10 +369,10 @@ class Guest(object):
                 devs.append(dev)
         return devs
 
-    def detach_device_with_retry(self, get_device_conf_func, device,
-                                 persistent, live, max_retry_count=7,
-                                 inc_sleep_time=2,
-                                 max_sleep_time=30):
+    def detach_device_with_retry(self, get_device_conf_func, device, live,
+                                 max_retry_count=7, inc_sleep_time=2,
+                                 max_sleep_time=30,
+                                 alternative_device_name=None):
         """Detaches a device from the guest. After the initial detach request,
         a function is returned which can be used to ensure the device is
         successfully removed from the guest domain (retrying the removal as
@@ -383,8 +381,6 @@ class Guest(object):
         :param get_device_conf_func: function which takes device as a parameter
                                      and returns the configuration for device
         :param device: device to detach
-        :param persistent: bool to indicate whether the change is
-                           persistent or not
         :param live: bool to indicate whether it affects the guest in running
                      state
         :param max_retry_count: number of times the returned function will
@@ -395,7 +391,11 @@ class Guest(object):
                                time will not be incremented using param
                                inc_sleep_time. On reaching this threshold,
                                max_sleep_time will be used as the sleep time.
+        :param alternative_device_name: This is an alternative identifier for
+            the device if device is not an ID, used solely for error messages.
         """
+        alternative_device_name = alternative_device_name or device
+
         def _try_detach_device(conf, persistent=False, live=False):
             # Raise DeviceNotFound if the device isn't found during detach
             try:
@@ -411,21 +411,40 @@ class Guest(object):
                         if 'not found' in errmsg:
                             # This will be raised if the live domain
                             # detach fails because the device is not found
-                            raise exception.DeviceNotFound(device=device)
+                            raise exception.DeviceNotFound(
+                                device=alternative_device_name)
                     elif errcode == libvirt.VIR_ERR_INVALID_ARG:
                         errmsg = ex.get_error_message()
                         if 'no target device' in errmsg:
                             # This will be raised if the persistent domain
                             # detach fails because the device is not found
-                            raise exception.DeviceNotFound(device=device)
+                            raise exception.DeviceNotFound(
+                                device=alternative_device_name)
 
         conf = get_device_conf_func(device)
         if conf is None:
-            raise exception.DeviceNotFound(device=device)
+            raise exception.DeviceNotFound(device=alternative_device_name)
 
-        LOG.debug('Attempting initial detach for device %s', device)
-        _try_detach_device(conf, persistent, live)
-        LOG.debug('Start retrying detach until device %s is gone.', device)
+        persistent = self.has_persistent_configuration()
+
+        LOG.debug('Attempting initial detach for device %s',
+                  alternative_device_name)
+        try:
+            _try_detach_device(conf, persistent, live)
+        except exception.DeviceNotFound:
+            # NOTE(melwitt): There are effectively two configs for an instance.
+            # The persistent config (affects instance upon next boot) and the
+            # live config (affects running instance). When we detach a device,
+            # we need to detach it from both configs if the instance has a
+            # persistent config and a live config. If we tried to detach the
+            # device with persistent=True and live=True and it was not found,
+            # we should still try to detach from the live config, so continue.
+            if persistent and live:
+                pass
+            else:
+                raise
+        LOG.debug('Start retrying detach until device %s is gone.',
+                  alternative_device_name)
 
         @loopingcall.RetryDecorator(max_retry_count=max_retry_count,
                                     inc_sleep_time=inc_sleep_time,
@@ -439,8 +458,8 @@ class Guest(object):
                 _try_detach_device(config, persistent=False, live=live)
 
                 reason = _("Unable to detach from guest transient domain.")
-                raise exception.DeviceDetachFailed(device=device,
-                                                   reason=reason)
+                raise exception.DeviceDetachFailed(
+                    device=alternative_device_name, reason=reason)
 
         return _do_wait_and_retry_detach
 
@@ -630,10 +649,23 @@ class Guest(object):
                 destination, flags=flags, bandwidth=bandwidth)
         else:
             if params:
+                # Due to a quirk in the libvirt python bindings,
+                # VIR_MIGRATE_NON_SHARED_INC with an empty migrate_disks is
+                # interpreted as "block migrate all writable disks" rather than
+                # "don't block migrate any disks". This includes attached
+                # volumes, which will potentially corrupt data on those
+                # volumes. Consequently we need to explicitly unset
+                # VIR_MIGRATE_NON_SHARED_INC if there are no disks to be block
+                # migrated.
+                if (flags & libvirt.VIR_MIGRATE_NON_SHARED_INC != 0 and
+                        not params.get('migrate_disks')):
+                    flags &= ~libvirt.VIR_MIGRATE_NON_SHARED_INC
+
+                # In migrateToURI3 these parameters are extracted from the
+                # `params` dict
                 if migrate_uri:
-                    # In migrateToURI3 this paramenter is searched in
-                    # the `params` dict
                     params['migrate_uri'] = migrate_uri
+                params['bandwidth'] = bandwidth
                 self._domain.migrateToURI3(
                     destination, params=params, flags=flags)
             else:
@@ -741,7 +773,7 @@ class BlockDevice(object):
             end=status['end'])
 
     def rebase(self, base, shallow=False, reuse_ext=False,
-               copy=False, relative=False):
+               copy=False, relative=False, copy_dev=False):
         """Copy data from backing chain into a new disk
 
         This copies data from backing file(s) into overlay(s), giving
@@ -754,10 +786,12 @@ class BlockDevice(object):
                           pre-created
         :param copy: Start a copy job
         :param relative: Keep backing chain referenced using relative names
+        :param copy_dev: Treat the destination as type="block"
         """
         flags = shallow and libvirt.VIR_DOMAIN_BLOCK_REBASE_SHALLOW or 0
         flags |= reuse_ext and libvirt.VIR_DOMAIN_BLOCK_REBASE_REUSE_EXT or 0
         flags |= copy and libvirt.VIR_DOMAIN_BLOCK_REBASE_COPY or 0
+        flags |= copy_dev and libvirt.VIR_DOMAIN_BLOCK_REBASE_COPY_DEV or 0
         flags |= relative and libvirt.VIR_DOMAIN_BLOCK_REBASE_RELATIVE or 0
         return self._guest._domain.blockRebase(
             self._disk, base, self.REBASE_DEFAULT_BANDWIDTH, flags=flags)

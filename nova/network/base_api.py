@@ -33,6 +33,11 @@ LOG = logging.getLogger(__name__)
 @hooks.add_hook('instance_network_info')
 def update_instance_cache_with_nw_info(impl, context, instance,
                                        nw_info=None, update_cells=True):
+    if instance.deleted:
+        LOG.debug('Instance is deleted, no further info cache update',
+                  instance=instance)
+        return
+
     try:
         if not isinstance(nw_info, network_model.NetworkInfo):
             nw_info = None
@@ -48,6 +53,7 @@ def update_instance_cache_with_nw_info(impl, context, instance,
         ic = objects.InstanceInfoCache.new(context, instance.uuid)
         ic.network_info = nw_info
         ic.save(update_cells=update_cells)
+        instance.info_cache = ic
     except Exception:
         with excutils.save_and_reraise_exception():
             LOG.exception(_LE('Failed storing info cache'), instance=instance)
@@ -210,7 +216,7 @@ class NetworkAPI(base.Base):
 
     def allocate_port_for_instance(self, context, instance, port_id,
                                    network_id=None, requested_ip=None,
-                                   bind_host_id=None):
+                                   bind_host_id=None, tag=None):
         """Allocate port for instance."""
         raise NotImplementedError()
 

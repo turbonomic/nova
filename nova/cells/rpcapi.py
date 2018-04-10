@@ -26,10 +26,11 @@ messaging module.
 from oslo_log import log as logging
 import oslo_messaging as messaging
 from oslo_serialization import jsonutils
+from oslo_utils import uuidutils
 
+from nova import cells
 import nova.conf
 from nova import exception
-from nova.i18n import _LE
 from nova import objects
 from nova.objects import base as objects_base
 from nova import profiler
@@ -120,6 +121,8 @@ class CellsAPI(object):
         So, any changes to existing methods in 1.x after that point should be
         done such that they can handle the version_cap being set to
         1.37.
+
+        * 1.38 - Handle uuid parameter in compute_node_get() method.
     '''
 
     VERSION_ALIASES = {
@@ -136,7 +139,7 @@ class CellsAPI(object):
 
     def __init__(self):
         super(CellsAPI, self).__init__()
-        target = messaging.Target(topic=CONF.cells.topic, version='1.0')
+        target = messaging.Target(topic=cells.TOPIC, version='1.0')
         version_cap = self.VERSION_ALIASES.get(CONF.upgrade_levels.cells,
                                                CONF.upgrade_levels.cells)
         # NOTE(sbauza): Yes, this is ugly but cells_utils is calling cells.db
@@ -328,8 +331,7 @@ class CellsAPI(object):
         return cctxt.call(ctxt, 'proxy_rpc_to_manager',
                           topic=topic,
                           rpc_message=rpc_message,
-                          call=call,
-                          timeout=timeout)
+                          call=call)
 
     def task_log_get_all(self, ctxt, task_name, period_beginning,
                          period_ending, host=None, state=None):
@@ -342,8 +344,16 @@ class CellsAPI(object):
                           host=host, state=state)
 
     def compute_node_get(self, ctxt, compute_id):
-        """Get a compute node by ID in a specific cell."""
-        cctxt = self.client.prepare(version='1.4')
+        """Get a compute node by ID or UUID in a specific cell."""
+        version = '1.38'
+        if uuidutils.is_uuid_like(compute_id):
+            if not self.client.can_send_version(version):
+                LOG.warning('Unable to get compute node by UUID %s; service '
+                            'is too old or the version is capped.', compute_id)
+                raise exception.ComputeHostNotFound(host=compute_id)
+        else:
+            version = '1.4'
+        cctxt = self.client.prepare(version=version)
         return cctxt.call(ctxt, 'compute_node_get', compute_id=compute_id)
 
     def compute_node_get_all(self, ctxt, hypervisor_match=None):
@@ -420,7 +430,7 @@ class CellsAPI(object):
             cctxt.cast(ctxt, 'bdm_update_or_create_at_top',
                        bdm=bdm, create=create)
         except Exception:
-            LOG.exception(_LE("Failed to notify cells of BDM update/create."))
+            LOG.exception("Failed to notify cells of BDM update/create.")
 
     def bdm_destroy_at_top(self, ctxt, instance_uuid, device_name=None,
                            volume_id=None):
@@ -434,7 +444,7 @@ class CellsAPI(object):
                        device_name=device_name,
                        volume_id=volume_id)
         except Exception:
-            LOG.exception(_LE("Failed to notify cells of BDM destroy."))
+            LOG.exception("Failed to notify cells of BDM destroy.")
 
     def get_migrations(self, ctxt, filters):
         """Get all migrations applying the filters."""
@@ -561,7 +571,7 @@ class CellsAPI(object):
         cctxt.cast(ctxt, 'soft_delete_instance', instance=instance)
 
     def resize_instance(self, ctxt, instance, extra_instance_updates,
-                       scheduler_hint, flavor, reservations,
+                       scheduler_hint, flavor, reservations=None,
                        clean_shutdown=True,
                        request_spec=None):
         # NOTE(sbauza): Since Cells v1 is quite feature-frozen, we don't want
@@ -596,12 +606,12 @@ class CellsAPI(object):
                    host_name=host_name)
 
     def revert_resize(self, ctxt, instance, migration, host,
-                      reservations):
+                      reservations=None):
         cctxt = self.client.prepare(version='1.21')
         cctxt.cast(ctxt, 'revert_resize', instance=instance)
 
     def confirm_resize(self, ctxt, instance, migration, host,
-                       reservations, cast=True):
+                       reservations=None, cast=True):
         # NOTE(comstud): This is only used in the API cell where we should
         # always cast and ignore the 'cast' kwarg.
         # Also, the compute api method normally takes an optional

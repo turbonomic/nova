@@ -26,6 +26,7 @@ from nova import context
 from nova import db
 from nova import objects
 from nova import test
+from nova.tests import uuidsentinel
 
 CONF = nova.conf.CONF
 
@@ -47,7 +48,7 @@ class AvailabilityZoneTestCases(test.TestCase):
         super(AvailabilityZoneTestCases, self).tearDown()
 
     def _create_az(self, agg_name, az_name):
-        agg_meta = {'name': agg_name}
+        agg_meta = {'name': agg_name, 'uuid': uuidsentinel.agg_uuid}
         agg = db.aggregate_create(self.context, agg_meta)
 
         metadata = {'availability_zone': az_name}
@@ -61,7 +62,7 @@ class AvailabilityZoneTestCases(test.TestCase):
 
     def _create_service_with_topic(self, topic, host, disabled=False):
         values = {
-            'binary': 'bin',
+            'binary': 'nova-bin',
             'host': host,
             'topic': topic,
             'disabled': disabled,
@@ -266,9 +267,25 @@ class AvailabilityZoneTestCases(test.TestCase):
             az.get_instance_availability_zone(self.context, fake_inst))
 
     def test_get_instance_availability_zone_no_host(self):
-        """Test get availability zone from instance if host not set."""
+        """Test get availability zone from instance if host is None."""
         fake_inst = objects.Instance(host=None, availability_zone='inst-az')
 
+        result = az.get_instance_availability_zone(self.context, fake_inst)
+        self.assertEqual('inst-az', result)
+
+    def test_get_instance_availability_zone_no_host_set(self):
+        """Test get availability zone from instance if host not set.
+
+        This is testing the case in the compute API where the Instance object
+        does not have the host attribute set because it's just the object that
+        goes into the BuildRequest, it wasn't actually pulled from the DB. The
+        instance in this case doesn't actually get inserted into the DB until
+        it reaches conductor. So the host attribute may not be set but we
+        expect availability_zone always will in the API because of
+        _validate_and_build_base_options setting a default value which goes
+        into the object.
+        """
+        fake_inst = objects.Instance(availability_zone='inst-az')
         result = az.get_instance_availability_zone(self.context, fake_inst)
         self.assertEqual('inst-az', result)
 

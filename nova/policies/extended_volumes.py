@@ -19,16 +19,24 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-extended-volumes'
-POLICY_ROOT = 'os_compute_api:os-extended-volumes:%s'
 
 
 extended_volumes_policies = [
-    policy.RuleDefault(
-        name=BASE_POLICY_NAME,
-        check_str=base.RULE_ADMIN_OR_OWNER),
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'discoverable',
-        check_str=base.RULE_ANY),
+    policy.DocumentedRuleDefault(
+        BASE_POLICY_NAME,
+        base.RULE_ADMIN_OR_OWNER,
+        "Return 'os-extended-volumes:volumes_attached' in the response of "
+        "server",
+        [
+            {
+                'method': 'GET',
+                'path': '/servers/{id}'
+            },
+            {
+                'method': 'GET',
+                'path': '/servers/detail'
+            }
+        ]),
 ]
 
 

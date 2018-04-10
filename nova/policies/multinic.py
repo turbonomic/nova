@@ -19,16 +19,26 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-multinic'
-POLICY_ROOT = 'os_compute_api:os-multinic:%s'
 
 
 multinic_policies = [
-    policy.RuleDefault(
-        name=BASE_POLICY_NAME,
-        check_str=base.RULE_ADMIN_OR_OWNER),
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'discoverable',
-        check_str=base.RULE_ANY),
+    policy.DocumentedRuleDefault(
+        BASE_POLICY_NAME,
+        base.RULE_ADMIN_OR_OWNER,
+        """Add or remove a fixed IP address from a server.
+
+These APIs are proxy calls to the Network service. These are all
+deprecated.""",
+        [
+            {
+                'method': 'POST',
+                'path': '/servers/{server_id}/action (addFixedIp)'
+            },
+            {
+                'method': 'POST',
+                'path': '/servers/{server_id}/action (removeFixedIp)'
+            }
+        ]),
 ]
 
 

@@ -30,7 +30,7 @@ from nova.tests.unit import utils
 class MicroversionedTest(testscenarios.WithScenarios, test.NoDBTestCase):
 
     scenarios = [
-        ('legacy-microverison', {
+        ('legacy-microversion', {
             'header_name': 'X-OpenStack-Nova-API-Version',
         }),
         ('modern-microversion', {
@@ -97,27 +97,6 @@ class RequestTest(MicroversionedTest):
                 {'uuid0': instances[0],
                  'uuid1': instances[1],
                  'uuid2': instances[2]})
-
-    def test_cache_and_retrieve_compute_nodes(self):
-        request = wsgi.Request.blank('/foo')
-        compute_nodes = []
-        for x in range(3):
-            compute_nodes.append({'id': 'id%s' % x})
-        # Store 2
-        request.cache_db_compute_nodes(compute_nodes[:2])
-        # Store 1
-        request.cache_db_compute_node(compute_nodes[2])
-        self.assertEqual(request.get_db_compute_node('id0'),
-                compute_nodes[0])
-        self.assertEqual(request.get_db_compute_node('id1'),
-                compute_nodes[1])
-        self.assertEqual(request.get_db_compute_node('id2'),
-                compute_nodes[2])
-        self.assertIsNone(request.get_db_compute_node('id3'))
-        self.assertEqual(request.get_db_compute_nodes(),
-                {'id0': compute_nodes[0],
-                 'id1': compute_nodes[1],
-                 'id2': compute_nodes[2]})
 
     def test_from_request(self):
         request = wsgi.Request.blank('/')
@@ -591,6 +570,16 @@ class ResourceTest(MicroversionedTest):
         content_type, body = resource.get_body(request)
         self.assertEqual('application/json', content_type)
         self.assertEqual(b'', body)
+
+    def test_get_body_content_body_none(self):
+        resource = wsgi.Resource(None)
+        request = wsgi.Request.blank('/', method='PUT')
+        body = None
+
+        contents = resource._get_request_content(body, request)
+
+        self.assertIn('body', contents)
+        self.assertIsNone(contents['body'])
 
     def test_get_body(self):
         class Controller(object):

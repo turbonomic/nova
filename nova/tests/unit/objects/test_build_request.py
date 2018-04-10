@@ -16,6 +16,7 @@ from oslo_versionedobjects import base as o_vo_base
 
 from nova import exception
 from nova import objects
+from nova.objects import base
 from nova.objects import build_request
 from nova.tests.unit import fake_build_request
 from nova.tests.unit import fake_instance
@@ -139,6 +140,9 @@ class _TestBuildRequestObject(object):
         # on build_request
         fake_req = fake_build_request.fake_db_req()
         fields = jsonutils.loads(fake_req['instance'])['nova_object.data']
+        # TODO(Kevin Zheng): clean up this workaround once
+        # build_request.get_new_instance() can handle tags.
+        fields.pop('tags', None)
         build_request = objects.BuildRequest._from_db_object(
             self.context, objects.BuildRequest(), fake_req)
         self.assertEqual(0, len(build_request.instance.obj_what_changed()))
@@ -158,6 +162,28 @@ class _TestBuildRequestObject(object):
                 self.context, objects.BuildRequest(), fake_req)
         mock_obj_set_defaults.assert_called_once_with('deleted')
         self.assertFalse(build_request.instance.deleted)
+
+    def test_obj_make_compatible_pre_1_3(self):
+        obj = fake_build_request.fake_req_obj(self.context)
+        build_request_obj = objects.BuildRequest(self.context)
+        obj_primitive = obj.obj_to_primitive()
+        build_request_obj.obj_make_compatible(obj_primitive, '1.2')
+        self.assertNotIn('tags', obj_primitive)
+
+    def test_create_with_tags_set(self):
+        # Test that when we set tags on the build request,
+        # create it and reload it from the database that the
+        # build_request.instance.tags is the same thing.
+        build_request_obj = fake_build_request.fake_req_obj(self.context)
+        self.assertEqual(1, len(build_request_obj.tags))
+        build_request_obj.create()
+        self.assertEqual(1, len(build_request_obj.tags))
+        self.assertEqual(len(build_request_obj.tags),
+                         len(build_request_obj.instance.tags))
+        # Can't compare list objects directly, just compare the single
+        # item they contain.
+        base.obj_equal_prims(build_request_obj.tags[0],
+                             build_request_obj.instance.tags[0])
 
 
 class TestBuildRequestObject(test_objects._LocalTest,

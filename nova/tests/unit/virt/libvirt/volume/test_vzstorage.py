@@ -40,7 +40,7 @@ class LibvirtVZStorageTestCase(test_volume.LibvirtVolumeBaseTestCase):
         """Test that custom options cannot duplicate the configured"""
         bad_opts = [
                      ["-c", "clus111", "-v"],
-                     ["-l", "/var/log/pstorage.log", "-L", "5x5"],
+                     ["-l", "/var/log/vstorage.log", "-L", "5x5"],
                      ["-u", "user1", "-p", "pass1"],
                      ["-v", "-R", "100", "-C", "/ssd"],
                    ]
@@ -64,9 +64,12 @@ class LibvirtVZStorageTestCase(test_volume.LibvirtVolumeBaseTestCase):
                                 err_pattern,
                                 drv.connect_volume,
                                 connection_info,
-                                self.disk_info)
+                                self.disk_info,
+                                mock.sentinel.instance)
 
-    def test_libvirt_vzstorage_driver_connect(self):
+    @mock.patch.object(vzstorage.utils, 'synchronized',
+                       return_value=lambda f: f)
+    def test_libvirt_vzstorage_driver_connect(self, mock_synchronized):
         def brick_conn_vol(data):
             return {'path': 'vstorage://testcluster'}
 
@@ -77,19 +80,21 @@ class LibvirtVZStorageTestCase(test_volume.LibvirtVolumeBaseTestCase):
         connection_info = {'data': {'export': export_string,
                                     'name': self.name}}
 
-        drv.connect_volume(connection_info, self.disk_info)
+        drv.connect_volume(connection_info, self.disk_info,
+                           mock.sentinel.instance)
         self.assertEqual('vstorage://testcluster',
                          connection_info['data']['device_path'])
         self.assertEqual('-u stack -g qemu -m 0770 '
-                         '-l /var/log/pstorage/testcluster/nova.log.gz '
+                         '-l /var/log/vstorage/testcluster/nova.log.gz '
                          '-C /tmp/ssd-cache/testcluster',
                           connection_info['data']['options'])
+        mock_synchronized.assert_called_once_with('vz_share-testcluster')
 
     def test_libvirt_vzstorage_driver_disconnect(self):
         drv = vzstorage.LibvirtVZStorageVolumeDriver(self.fake_host)
         drv.connector.disconnect_volume = mock.MagicMock()
         conn = {'data': self.disk_info}
-        drv.disconnect_volume(conn, self.disk_info)
+        drv.disconnect_volume(conn, self.disk_info, mock.sentinel.instance)
         drv.connector.disconnect_volume.assert_called_once_with(
             self.disk_info, None)
 

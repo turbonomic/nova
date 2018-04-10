@@ -18,6 +18,7 @@ from six.moves import range
 from webob import exc
 
 from nova import context
+from nova import exception
 from nova.i18n import _
 from nova import objects
 from nova import utils
@@ -67,7 +68,12 @@ def handle_password(req, meta_data):
             msg = _("Request is too large.")
             raise exc.HTTPBadRequest(explanation=msg)
 
-        instance = objects.Instance.get_by_uuid(ctxt, meta_data.uuid)
+        im = objects.InstanceMapping.get_by_instance_uuid(ctxt, meta_data.uuid)
+        with context.target_cell(ctxt, im.cell_mapping) as cctxt:
+            try:
+                instance = objects.Instance.get_by_uuid(cctxt, meta_data.uuid)
+            except exception.InstanceNotFound as e:
+                raise exc.HTTPBadRequest(explanation=e.format_message())
         instance.system_metadata.update(convert_password(ctxt, req.body))
         instance.save()
     else:

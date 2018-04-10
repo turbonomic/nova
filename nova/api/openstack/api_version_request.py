@@ -102,6 +102,32 @@ REST_API_VERSION_HISTORY = """REST API Version History:
              re-introduce the tag attribute that, due to bugs, was lost
              starting with version 2.33 for block devices and starting with
              version 2.37 for network interfaces.
+    * 2.43 - Deprecate os-hosts API
+    * 2.44 - The servers action addFixedIp, removeFixedIp, addFloatingIp,
+             removeFloatingIp and os-virtual-interfaces APIs are deprecated.
+    * 2.45 - The createImage and createBackup APIs no longer return a Location
+             header in the response for the snapshot image, they now return a
+             json dict in the response body with an image_id key and uuid
+             value.
+    * 2.46 - Return ``X-OpenStack-Request-ID`` header on requests.
+    * 2.47 - When displaying server details, display the flavor as a dict
+             rather than a link.  If the user is prevented from retrieving
+             the flavor extra-specs by policy, simply omit the field from
+             the output.
+    * 2.48 - Standardize VM diagnostics info.
+    * 2.49 - Support tagged attachment of network interfaces and block devices.
+    * 2.50 - Exposes ``server_groups`` and ``server_group_members`` keys in
+             GET & PUT ``os-quota-class-sets`` APIs response.
+             Also filter out Network related quotas from
+             ``os-quota-class-sets`` API
+    * 2.51 - Adds new event name to external-events (volume-extended). Also,
+             non-admins can see instance action event details except for the
+             traceback field.
+    * 2.52 - Adds support for applying tags when creating a server.
+    * 2.53 - Service and compute node (hypervisor) database ids are hidden.
+             The os-services and os-hypervisors APIs now return a uuid in the
+             id field, and takes a uuid in requests. PUT and GET requests
+             and responses are also changed.
 """
 
 # The minimum and maximum versions of the API supported
@@ -110,7 +136,7 @@ REST_API_VERSION_HISTORY = """REST API Version History:
 # Note(cyeoh): This only applies for the v2.1 API once microversions
 # support is fully merged. It does not affect the V2 API.
 _MIN_API_VERSION = "2.1"
-_MAX_API_VERSION = "2.42"
+_MAX_API_VERSION = "2.53"
 DEFAULT_API_VERSION = _MIN_API_VERSION
 
 # Almost all proxy APIs which related to network, images and baremetal

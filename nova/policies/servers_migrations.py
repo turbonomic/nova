@@ -22,7 +22,7 @@ POLICY_ROOT = 'os_compute_api:servers:migrations:%s'
 
 
 servers_migrations_policies = [
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         POLICY_ROOT % 'show',
         base.RULE_ADMIN_API,
         "Show details for an in-progress live migration for a given server",
@@ -32,7 +32,7 @@ servers_migrations_policies = [
                 'path': '/servers/{server_id}/migrations/{migration_id}'
             }
         ]),
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         POLICY_ROOT % 'force_complete',
         base.RULE_ADMIN_API,
         "Force an in-progress live migration for a given server to complete",
@@ -43,7 +43,7 @@ servers_migrations_policies = [
                         '/action (force_complete)'
             }
         ]),
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         POLICY_ROOT % 'delete',
         base.RULE_ADMIN_API,
         "Delete(Abort) an in-progress live migration",
@@ -53,7 +53,7 @@ servers_migrations_policies = [
                 'path': '/servers/{server_id}/migrations/{migration_id}'
             }
         ]),
-    base.create_rule_default(
+    policy.DocumentedRuleDefault(
         POLICY_ROOT % 'index',
         base.RULE_ADMIN_API,
         "Lists in-progress live migrations for a given server",
@@ -63,9 +63,6 @@ servers_migrations_policies = [
                 'path': '/servers/{server_id}/migrations'
             }
         ]),
-    policy.RuleDefault(
-        name='os_compute_api:server-migrations:discoverable',
-        check_str=base.RULE_ANY),
 ]
 
 

@@ -24,8 +24,6 @@ from nova import compute
 from nova import exception
 from nova.policies import deferred_delete as dd_policies
 
-ALIAS = 'os-deferred-delete'
-
 
 class DeferredDeleteController(wsgi.Controller):
     def __init__(self, *args, **kwargs):
@@ -62,25 +60,8 @@ class DeferredDeleteController(wsgi.Controller):
                             'project_id': instance.project_id})
         try:
             self.compute_api.force_delete(context, instance)
-        except exception.InstanceNotFound as e:
-            raise webob.exc.HTTPNotFound(explanation=e.format_message())
-        except exception.InstanceUnknownCell as e:
+        except (exception.InstanceNotFound,
+                exception.InstanceUnknownCell) as e:
             raise webob.exc.HTTPNotFound(explanation=e.format_message())
         except exception.InstanceIsLocked as e:
             raise webob.exc.HTTPConflict(explanation=e.format_message())
-
-
-class DeferredDelete(extensions.V21APIExtensionBase):
-    """Instance deferred delete."""
-
-    name = "DeferredDelete"
-    alias = "os-deferred-delete"
-    version = 1
-
-    def get_controller_extensions(self):
-        controller = DeferredDeleteController()
-        extension = extensions.ControllerExtension(self, 'servers', controller)
-        return [extension]
-
-    def get_resources(self):
-        return []

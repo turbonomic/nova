@@ -19,16 +19,23 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:image-size'
-POLICY_ROOT = 'os_compute_api:image-size:%s'
 
 
 image_size_policies = [
-    policy.RuleDefault(
-        name=POLICY_ROOT % 'discoverable',
-        check_str=base.RULE_ANY),
-    policy.RuleDefault(
-        name=BASE_POLICY_NAME,
-        check_str=base.RULE_ADMIN_OR_OWNER),
+    policy.DocumentedRuleDefault(
+        BASE_POLICY_NAME,
+        base.RULE_ADMIN_OR_OWNER,
+        """Add 'OS-EXT-IMG-SIZE:size' attribute in the image response.""",
+        [
+            {
+                'method': 'GET',
+                'path': '/images/{id}'
+            },
+            {
+                'method': 'GET',
+                'path': '/images/detail'
+            }
+        ]),
 ]
 
 
