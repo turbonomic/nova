@@ -16,6 +16,7 @@ from oslo_log import log as logging
 from oslo_utils import importutils
 
 from nova import exception
+from nova.i18n import _LI
 
 LOG = logging.getLogger(__name__)
 
@@ -68,8 +69,8 @@ class VFS(object):
                 # check for capabilities.
                 raise
             else:
-                LOG.info("Unable to import guestfs, "
-                         "falling back to VFSLocalFS")
+                LOG.info(_LI("Unable to import guestfs, "
+                             "falling back to VFSLocalFS"))
 
         return importutils.import_object(
             "nova.virt.disk.vfs.localfs.VFSLocalFS",

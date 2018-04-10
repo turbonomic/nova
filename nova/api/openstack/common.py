@@ -26,6 +26,7 @@ import webob
 from webob import exc
 
 from nova.compute import task_states
+from nova.compute import utils as compute_utils
 from nova.compute import vm_states
 import nova.conf
 from nova import exception
@@ -322,7 +323,7 @@ def get_networks_for_instance(context, instance):
                                       'mac_address': 'aa:aa:aa:aa:aa:aa'}]},
          ...}
     """
-    nw_info = instance.get_network_info()
+    nw_info = compute_utils.get_nw_info_for_instance(instance)
     return get_networks_for_instance_from_nw_info(nw_info)
 
 
@@ -380,7 +381,7 @@ class ViewBuilder(object):
         otherwise
         """
         project_id = request.environ["nova.context"].project_id
-        if project_id and project_id in request.url:
+        if project_id in request.url:
             return project_id
         return ''
 

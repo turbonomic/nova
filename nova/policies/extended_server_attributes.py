@@ -19,37 +19,16 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-extended-server-attributes'
+POLICY_ROOT = 'os_compute_api:os-extended-server-attributes:%s'
 
 
 extended_server_attributes_policies = [
-    policy.DocumentedRuleDefault(
-        BASE_POLICY_NAME,
-        base.RULE_ADMIN_API,
-        """Return extended attributes for server.
-
-This rule will control the visibility for a set of servers attributes:
-
-- ``OS-EXT-SRV-ATTR:host``
-- ``OS-EXT-SRV-ATTR:instance_name``
-- ``OS-EXT-SRV-ATTR:reservation_id`` (since microversion 2.3)
-- ``OS-EXT-SRV-ATTR:launch_index`` (since microversion 2.3)
-- ``OS-EXT-SRV-ATTR:hostname`` (since microversion 2.3)
-- ``OS-EXT-SRV-ATTR:kernel_id`` (since microversion 2.3)
-- ``OS-EXT-SRV-ATTR:ramdisk_id`` (since microversion 2.3)
-- ``OS-EXT-SRV-ATTR:root_device_name`` (since microversion 2.3)
-- ``OS-EXT-SRV-ATTR:user_data`` (since microversion 2.3)
-""",
-        [
-            {
-                'method': 'GET',
-                'path': '/servers/{id}'
-            },
-            {
-                'method': 'GET',
-                'path': '/servers/detail'
-            }
-        ]
-    ),
+    policy.RuleDefault(
+        name=BASE_POLICY_NAME,
+        check_str=base.RULE_ADMIN_API),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
 ]
 
 

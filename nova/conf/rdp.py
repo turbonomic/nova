@@ -46,8 +46,7 @@ Related options:
 
 """),
 
-    cfg.URIOpt('html5_proxy_base_url',
-        schemes=['http', 'https'],
+    cfg.StrOpt('html5_proxy_base_url',
         default='http://127.0.0.1:6083/',
         help="""
 The URL an end user would use to connect to the RDP HTML5 console proxy.
@@ -69,7 +68,7 @@ Possible values:
 * <scheme>://<ip-address>:<port-number>/
 
   The scheme must be identical to the scheme configured for the RDP HTML5
-  console proxy service. It is ``http`` or ``https``.
+  console proxy service.
 
   The IP address must be identical to the address on which the RDP HTML5
   console proxy service is listening.

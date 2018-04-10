@@ -30,7 +30,8 @@ import six
 
 import nova.conf
 from nova import exception
-from nova.i18n import _
+
+from nova.i18n import _, _LE, _LW
 
 
 CONF = nova.conf.CONF
@@ -175,7 +176,7 @@ def introduce_vdi(session, sr_ref, vdi_uuid=None, target_lun=None):
             session.call_xenapi("SR.scan", sr_ref)
             vdi_ref = _get_vdi_ref(session, sr_ref, vdi_uuid, target_lun)
     except session.XenAPI.Failure:
-        LOG.exception(_('Unable to introduce VDI on SR'))
+        LOG.exception(_LE('Unable to introduce VDI on SR'))
         raise exception.StorageError(
                 reason=_('Unable to introduce VDI on SR %s') % sr_ref)
 
@@ -190,7 +191,7 @@ def introduce_vdi(session, sr_ref, vdi_uuid=None, target_lun=None):
         vdi_rec = session.call_xenapi("VDI.get_record", vdi_ref)
         LOG.debug(vdi_rec)
     except session.XenAPI.Failure:
-        LOG.exception(_('Unable to get record of VDI'))
+        LOG.exception(_LE('Unable to get record of VDI'))
         raise exception.StorageError(
                 reason=_('Unable to get record of VDI %s on') % vdi_ref)
 
@@ -212,7 +213,7 @@ def introduce_vdi(session, sr_ref, vdi_uuid=None, target_lun=None):
                                     vdi_rec['xenstore_data'],
                                     vdi_rec['sm_config'])
     except session.XenAPI.Failure:
-        LOG.exception(_('Unable to introduce VDI for SR'))
+        LOG.exception(_LE('Unable to introduce VDI for SR'))
         raise exception.StorageError(
                 reason=_('Unable to introduce VDI for SR %s') % sr_ref)
 
@@ -241,7 +242,7 @@ def purge_sr(session, sr_ref):
     for vdi_ref in vdi_refs:
         vbd_refs = session.call_xenapi("VDI.get_VBDs", vdi_ref)
         if vbd_refs:
-            LOG.warning('Cannot purge SR with referenced VDIs')
+            LOG.warning(_LW('Cannot purge SR with referenced VDIs'))
             return
 
     forget_sr(session, sr_ref)
@@ -258,16 +259,16 @@ def _unplug_pbds(session, sr_ref):
     try:
         pbds = session.call_xenapi("SR.get_PBDs", sr_ref)
     except session.XenAPI.Failure as exc:
-        LOG.warning('Ignoring exception %(exc)s when getting PBDs'
-                    ' for %(sr_ref)s', {'exc': exc, 'sr_ref': sr_ref})
+        LOG.warning(_LW('Ignoring exception %(exc)s when getting PBDs'
+                        ' for %(sr_ref)s'), {'exc': exc, 'sr_ref': sr_ref})
         return
 
     for pbd in pbds:
         try:
             session.call_xenapi("PBD.unplug", pbd)
         except session.XenAPI.Failure as exc:
-            LOG.warning('Ignoring exception %(exc)s when unplugging'
-                        ' PBD %(pbd)s', {'exc': exc, 'pbd': pbd})
+            LOG.warning(_LW('Ignoring exception %(exc)s when unplugging'
+                            ' PBD %(pbd)s'), {'exc': exc, 'pbd': pbd})
 
 
 def get_device_number(mountpoint):
@@ -290,7 +291,7 @@ def _mountpoint_to_number(mountpoint):
     elif re.match('^[0-9]+$', mountpoint):
         return int(mountpoint, 10)
     else:
-        LOG.warning('Mountpoint cannot be translated: %s', mountpoint)
+        LOG.warning(_LW('Mountpoint cannot be translated: %s'), mountpoint)
         return -1
 
 
@@ -310,7 +311,7 @@ def find_sr_from_vbd(session, vbd_ref):
         vdi_ref = session.call_xenapi("VBD.get_VDI", vbd_ref)
         sr_ref = session.call_xenapi("VDI.get_SR", vdi_ref)
     except session.XenAPI.Failure:
-        LOG.exception(_('Unable to find SR from VBD'))
+        LOG.exception(_LE('Unable to find SR from VBD'))
         raise exception.StorageError(
                 reason=_('Unable to find SR from VBD %s') % vbd_ref)
     return sr_ref
@@ -321,7 +322,7 @@ def find_sr_from_vdi(session, vdi_ref):
     try:
         sr_ref = session.call_xenapi("VDI.get_SR", vdi_ref)
     except session.XenAPI.Failure:
-        LOG.exception(_('Unable to find SR from VDI'))
+        LOG.exception(_LE('Unable to find SR from VDI'))
         raise exception.StorageError(
                 reason=_('Unable to find SR from VDI %s') % vdi_ref)
     return sr_ref
@@ -392,5 +393,6 @@ def stream_to_vdi(session, instance, disk_format,
                 _stream_to_vdi(conn, vdi_import_path, file_size, file_obj)
             except Exception as e:
                 with excutils.save_and_reraise_exception():
-                    LOG.error('Streaming disk to VDI failed with error: %s',
+                    LOG.error(_LE('Streaming disk to VDI failed '
+                                  'with error: %s'),
                               e, instance=instance)

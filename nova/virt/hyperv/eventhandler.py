@@ -19,6 +19,7 @@ from os_win import utilsfactory
 from oslo_log import log as logging
 
 import nova.conf
+from nova.i18n import _LW
 from nova import utils
 from nova.virt import event as virtevent
 from nova.virt.hyperv import serialconsoleops
@@ -82,9 +83,10 @@ class InstanceEventHandler(object):
         try:
             instance_uuid = self._vmutils.get_instance_uuid(instance_name)
             if not instance_uuid:
-                LOG.warning("Instance uuid could not be retrieved for "
-                            "instance %s. Instance state change event "
-                            "will be ignored.", instance_name)
+                LOG.warning(_LW("Instance uuid could not be retrieved for "
+                             "instance %s. Instance state change event "
+                             "will be ignored."),
+                         instance_name)
             return instance_uuid
         except os_win_exc.HyperVVMNotFoundException:
             # The instance has been deleted.

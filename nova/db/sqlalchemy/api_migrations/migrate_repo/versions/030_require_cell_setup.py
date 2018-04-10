@@ -14,7 +14,7 @@ from oslo_log import log as logging
 from sqlalchemy import MetaData, Table, func, select
 
 from nova import exception
-from nova.i18n import _
+from nova.i18n import _, _LW
 from nova import objects
 
 LOG = logging.getLogger(__name__)
@@ -54,6 +54,7 @@ def upgrade(migrate_engine):
     host_mappings = Table('host_mappings', meta, autoload=True)
     count = select([func.count()]).select_from(host_mappings).scalar()
     if count == 0:
-        LOG.warning('No host mappings were found, but are required for Ocata. '
-                    'Please run nova-manage cell_v2 simple_cell_setup before '
-                    'continuing.')
+        msg = _LW('No host mappings were found, but are required for Ocata. '
+                  'Please run nova-manage cell_v2 simple_cell_setup before '
+                  'continuing.')
+        LOG.warning(msg)

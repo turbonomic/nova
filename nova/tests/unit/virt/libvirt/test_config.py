@@ -1027,73 +1027,6 @@ class LibvirtConfigGuestDiskTest(LibvirtConfigBaseTest):
                                                 obj.device_addr.unit))
         self.assertIsNone(obj.device_addr.format_address())
 
-    def test_config_disk_device_address_drive(self):
-        obj = config.LibvirtConfigGuestDeviceAddressDrive()
-        obj.controller = 1
-        obj.bus = 2
-        obj.target = 3
-        obj.unit = 4
-
-        xml = """
-        <address type="drive" controller="1" bus="2" target="3" unit="4"/>
-        """
-        self.assertXmlEqual(xml, obj.to_xml())
-
-    def test_config_disk_device_address_drive_added(self):
-        obj = config.LibvirtConfigGuestDisk()
-        obj.source_type = "file"
-        obj.source_path = "/tmp/hello"
-        obj.target_dev = "/dev/hda"
-        obj.target_bus = "scsi"
-        obj.device_addr = config.LibvirtConfigGuestDeviceAddressDrive()
-        obj.device_addr.controller = 1
-        obj.device_addr.bus = 2
-        obj.device_addr.target = 3
-        obj.device_addr.unit = 4
-
-        self.assertXmlEqual("""
-        <disk type="file" device="disk">
-          <source file="/tmp/hello"/>
-          <target bus="scsi" dev="/dev/hda"/>
-          <address type="drive" controller="1" bus="2" target="3" unit="4"/>
-        </disk>""", obj.to_xml())
-
-    def test_config_disk_device_address_pci(self):
-        obj = config.LibvirtConfigGuestDeviceAddressPCI()
-        obj.domain = 1
-        obj.bus = 2
-        obj.slot = 3
-        obj.function = 4
-
-        xml = """
-        <address type="pci" domain="1" bus="2" slot="3" function="4"/>
-        """
-        self.assertXmlEqual(xml, obj.to_xml())
-
-    def test_config_disk_device_address_pci_added(self):
-        obj = config.LibvirtConfigGuestDisk()
-        obj.source_type = "network"
-        obj.source_name = "volumes/volume-0"
-        obj.source_protocol = "rbd"
-        obj.source_hosts = ["192.168.1.1"]
-        obj.source_ports = ["1234"]
-        obj.target_dev = "hdb"
-        obj.target_bus = "virtio"
-        obj.device_addr = config.LibvirtConfigGuestDeviceAddressPCI()
-        obj.device_addr.domain = 1
-        obj.device_addr.bus = 2
-        obj.device_addr.slot = 3
-        obj.device_addr.function = 4
-
-        self.assertXmlEqual("""
-        <disk type="network" device="disk">
-          <source protocol="rbd" name="volumes/volume-0">
-            <host name="192.168.1.1" port="1234"/>
-          </source>
-          <target bus="virtio" dev="hdb"/>
-          <address type="pci" domain="1" bus="2" slot="3" function="4"/>
-        </disk>""", obj.to_xml())
-
     def test_config_disk_device_address_type_virtio_mmio(self):
         xml = """
             <disk type='file' device='disk'>
@@ -1194,12 +1127,12 @@ class LibvirtConfigGuestDiskBackingStoreTest(LibvirtConfigBaseTest):
     def test_config_network_parse(self):
         xml = """<backingStore type='network' index='1'>
                    <format type='qcow2'/>
-                   <source protocol='netfs' name='volume1/img1'>
+                   <source protocol='gluster' name='volume1/img1'>
                      <host name='host1' port='24007'/>
                    </source>
                    <backingStore type='network' index='2'>
                      <format type='qcow2'/>
-                     <source protocol='netfs' name='volume1/img2'>
+                     <source protocol='gluster' name='volume1/img2'>
                        <host name='host1' port='24007'/>
                      </source>
                      <backingStore/>
@@ -1212,7 +1145,7 @@ class LibvirtConfigGuestDiskBackingStoreTest(LibvirtConfigBaseTest):
         obj.parse_dom(xmldoc)
 
         self.assertEqual(obj.source_type, 'network')
-        self.assertEqual(obj.source_protocol, 'netfs')
+        self.assertEqual(obj.source_protocol, 'gluster')
         self.assertEqual(obj.source_name, 'volume1/img1')
         self.assertEqual(obj.source_hosts[0], 'host1')
         self.assertEqual(obj.source_ports[0], '24007')
@@ -2167,7 +2100,6 @@ class LibvirtConfigGuestTest(LibvirtConfigBaseTest):
             config.LibvirtConfigGuestFeatureACPI(),
             config.LibvirtConfigGuestFeatureAPIC(),
             config.LibvirtConfigGuestFeaturePAE(),
-            config.LibvirtConfigGuestFeatureKvmHidden()
         ]
 
         obj.sysinfo = config.LibvirtConfigGuestSysinfo()
@@ -2226,9 +2158,6 @@ class LibvirtConfigGuestTest(LibvirtConfigBaseTest):
                 <acpi/>
                 <apic/>
                 <pae/>
-                <kvm>
-                  <hidden state='on'/>
-                </kvm>
               </features>
               <cputune>
                 <shares>100</shares>
@@ -2545,7 +2474,7 @@ class LibvirtConfigGuestSnapshotTest(LibvirtConfigBaseTest):
         disk.source_type = 'network'
         disk.source_hosts = ['host1']
         disk.source_ports = ['12345']
-        disk.source_protocol = 'netfs'
+        disk.source_protocol = 'glusterfs'
         disk.snapshot = 'external'
         disk.driver_name = 'qcow2'
         obj.add_disk(disk)
@@ -2561,7 +2490,7 @@ class LibvirtConfigGuestSnapshotTest(LibvirtConfigBaseTest):
               <name>Demo</name>
               <disks>
                <disk name='vda' snapshot='external' type='network'>
-                <source protocol='netfs' name='source-file'>
+                <source protocol='glusterfs' name='source-file'>
                  <host name='host1' port='12345'/>
                 </source>
                </disk>
@@ -2758,40 +2687,6 @@ class LibvirtConfigNodeDeviceTest(LibvirtConfigBaseTest):
                           "phys_function")
         self.assertEqual(obj.pci_capability.fun_capability[1].type,
                           "virt_functions")
-
-    def test_config_net_device(self):
-        xmlin = """
-        <device>
-          <name>net_enp2s2_02_9a_a1_37_be_54</name>
-          <path>/sys/devices/pci0000:00/0000:00:02.0/net/enp2s2</path>
-          <parent>pci_0000_00_02_0</parent>
-          <capability type='net'>
-            <interface>enp2s2</interface>
-            <address>02:9a:a1:37:be:54</address>
-            <link state='down'/>
-            <feature name='rx'/>
-            <feature name='tx'/>
-            <feature name='sg'/>
-            <feature name='tso'/>
-            <feature name='gso'/>
-            <feature name='gro'/>
-            <feature name='rxvlan'/>
-            <feature name='txvlan'/>
-            <capability type='80203'/>
-          </capability>
-        </device>"""
-
-        obj = config.LibvirtConfigNodeDevice()
-        obj.parse_str(xmlin)
-
-        self.assertIsInstance(obj.pci_capability,
-                              config.LibvirtConfigNodeDevicePciCap)
-        self.assertEqual(obj.pci_capability.interface, "enp2s2")
-        self.assertEqual(obj.pci_capability.address, "02:9a:a1:37:be:54")
-        self.assertEqual(obj.pci_capability.link_state, "down")
-        self.assertEqual(obj.pci_capability.features,
-                         ['rx', 'tx', 'sg', 'tso', 'gso', 'gro', 'rxvlan',
-                          'txvlan'])
 
 
 class LibvirtConfigNodeDevicePciCapTest(LibvirtConfigBaseTest):

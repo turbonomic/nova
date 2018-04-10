@@ -19,7 +19,6 @@
 Handling of VM disk images.
 """
 
-import operator
 import os
 
 from oslo_concurrency import processutils
@@ -40,13 +39,8 @@ CONF = nova.conf.CONF
 IMAGE_API = image.API()
 
 QEMU_IMG_LIMITS = processutils.ProcessLimits(
-    cpu_time=30,
+    cpu_time=8,
     address_space=1 * units.Gi)
-
-# This is set by the libvirt driver on startup. The version is used to
-# determine what flags need to be set on the command line.
-QEMU_VERSION = None
-QEMU_VERSION_REQ_SHARED = 2010000
 
 
 def qemu_img_info(path, format=None):
@@ -66,10 +60,6 @@ def qemu_img_info(path, format=None):
         cmd = ('env', 'LC_ALL=C', 'LANG=C', 'qemu-img', 'info', path)
         if format is not None:
             cmd = cmd + ('-f', format)
-        # Check to see if the qemu version is >= 2.10 because if so, we need
-        # to add the --force-share flag.
-        if QEMU_VERSION and operator.ge(QEMU_VERSION, QEMU_VERSION_REQ_SHARED):
-            cmd = cmd + ('--force-share',)
         out, err = utils.execute(*cmd, prlimit=QEMU_IMG_LIMITS)
     except processutils.ProcessExecutionError as exp:
         # this means we hit prlimits, make the exception more specific
@@ -111,14 +101,7 @@ def convert_image_unsafe(source, dest, out_format, run_as_root=False):
 
 
 def _convert_image(source, dest, in_format, out_format, run_as_root):
-    # NOTE(mdbooth): qemu-img convert defaults to cache=unsafe, which means
-    # that data is not synced to disk at completion. We explicitly use
-    # cache=none here to (1) ensure that we don't interfere with other
-    # applications using the host's io cache, and (2) ensure that the data is
-    # on persistent storage when the command exits. Without (2), a host crash
-    # may leave a corrupt image in the image cache, which Nova cannot recover
-    # automatically.
-    cmd = ('qemu-img', 'convert', '-t', 'none', '-O', out_format)
+    cmd = ('qemu-img', 'convert', '-O', out_format)
     if in_format is not None:
         cmd = cmd + ('-f', in_format)
     cmd = cmd + (source, dest)

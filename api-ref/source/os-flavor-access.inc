@@ -57,9 +57,6 @@ Normal response codes: 200
 Error response codes: badRequest(400), unauthorized(401), forbidden(403),
 itemNotFound(404), conflict(409)
 
-- 400 - BadRequest - if the `tenant` is not found in your OpenStack
-  deployment, a 400 is returned to prevent typos on the API call.
-
 Request
 -------
 
@@ -103,9 +100,6 @@ Normal response codes: 200
 Error response codes: badRequest(400), unauthorized(401), forbidden(403),
 itemNotFound(404), conflict(409)
 
-- 400 - BadRequest - if the `tenant` is not found in your OpenStack
-  deployment, a 400 is returned to prevent typos on the API call.
-
 Request
 -------
 
@@ -134,3 +128,4 @@ Response
 
 .. literalinclude:: ../../doc/api_samples/flavor-access/flavor-access-remove-tenant-resp.json
    :language: javascript
+

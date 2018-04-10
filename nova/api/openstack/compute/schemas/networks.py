@@ -48,9 +48,9 @@ create = {
                 'allowed_end': parameter_types.ip_address,
                 'enable_dhcp': parameter_types.boolean,
                 'share_address': parameter_types.boolean,
-                'mtu': parameter_types.positive_integer_with_empty_str,
-                'vlan': parameter_types.positive_integer_with_empty_str,
-                'vlan_start': parameter_types.positive_integer_with_empty_str,
+                'mtu': parameter_types.positive_integer,
+                'vlan': parameter_types.positive_integer,
+                'vlan_start': parameter_types.positive_integer,
                 'vpn_start': {
                     'type': 'string',
                 },

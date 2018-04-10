@@ -29,8 +29,7 @@ Following options must be set to provide console access.
 """)
 
 mks_opts = [
-    cfg.URIOpt('mksproxy_base_url',
-               schemes=['http', 'https'],
+    cfg.StrOpt('mksproxy_base_url',
                default='http://127.0.0.1:6090/',
                help="""
 Location of MKS web console proxy
@@ -42,8 +41,7 @@ console access, WebMKS proxy should be installed and configured
 
 Possible values:
 
-* Must be a valid URL of the form:``http://host:port/`` or
-  ``https://host:port/``
+* Must be a valid URL of the form:``http://host:port/``
 """),
     cfg.BoolOpt('enabled',
                 default=False,

@@ -947,22 +947,6 @@ class NovaMigrationsCheckers(test_migrations.ModelsMigrationsSync,
         self.assertColumnExists(engine, 'block_device_mapping',
                                 'attachment_id')
 
-    def _check_359(self, engine, data):
-        self.assertColumnExists(engine, 'services', 'uuid')
-        self.assertIndexMembers(engine, 'services', 'services_uuid_idx',
-                                ['uuid'])
-
-    def _check_360(self, engine, data):
-        self.assertColumnExists(engine, 'compute_nodes', 'mapped')
-        self.assertColumnExists(engine, 'shadow_compute_nodes', 'mapped')
-
-    def _check_361(self, engine, data):
-        self.assertIndexMembers(engine, 'compute_nodes',
-                                'compute_nodes_uuid_idx', ['uuid'])
-
-    def _check_362(self, engine, data):
-        self.assertColumnExists(engine, 'pci_devices', 'uuid')
-
 
 class TestNovaMigrationsSQLite(NovaMigrationsCheckers,
                                test_base.DbTestCase,
@@ -1006,24 +990,23 @@ class ProjectTestCase(test.NoDBTestCase):
 
     def test_no_migrations_have_downgrade(self):
         topdir = os.path.normpath(os.path.dirname(__file__) + '/../../../')
-        # Walk both the nova_api and nova (cell) database migrations.
-        includes_downgrade = []
-        for subdir in ('api_migrations', ''):
-            py_glob = os.path.join(topdir, "db", "sqlalchemy", subdir,
-                                   "migrate_repo", "versions", "*.py")
-            for path in glob.iglob(py_glob):
-                has_upgrade = False
-                has_downgrade = False
-                with open(path, "r") as f:
-                    for line in f:
-                        if 'def upgrade(' in line:
-                            has_upgrade = True
-                        if 'def downgrade(' in line:
-                            has_downgrade = True
+        py_glob = os.path.join(topdir, "nova", "db", "sqlalchemy",
+                               "migrate_repo", "versions", "*.py")
 
-                    if has_upgrade and has_downgrade:
-                        fname = os.path.basename(path)
-                        includes_downgrade.append(fname)
+        includes_downgrade = []
+        for path in glob.iglob(py_glob):
+            has_upgrade = False
+            has_downgrade = False
+            with open(path, "r") as f:
+                for line in f:
+                    if 'def upgrade(' in line:
+                        has_upgrade = True
+                    if 'def downgrade(' in line:
+                        has_downgrade = True
+
+                if has_upgrade and has_downgrade:
+                    fname = os.path.basename(path)
+                    includes_downgrade.append(fname)
 
         helpful_msg = ("The following migrations have a downgrade "
                        "which is not supported:"

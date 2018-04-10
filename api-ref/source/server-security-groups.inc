@@ -29,9 +29,9 @@ Response
 
 .. rest_parameters:: parameters.yaml
 
-  - security_groups: security_groups_obj
+  - security_groups: security_groups
   - description: description
-  - id: security_group_id_body
+  - id: id
   - name: name
   - rules: rules
   - tenant_id: tenant_id_body

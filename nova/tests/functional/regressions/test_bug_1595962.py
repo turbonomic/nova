@@ -34,7 +34,6 @@ class TestSerialConsoleLiveMigrate(test.TestCase):
         super(TestSerialConsoleLiveMigrate, self).setUp()
         self.useFixture(policy_fixture.RealPolicyFixture())
         self.useFixture(nova_fixtures.NeutronFixture(self))
-        self.useFixture(nova_fixtures.PlacementFixture())
         api_fixture = self.useFixture(nova_fixtures.OSAPIFixture(
             api_version='v2.1'))
         # Replace libvirt with fakelibvirt
@@ -72,7 +71,7 @@ class TestSerialConsoleLiveMigrate(test.TestCase):
         self.compute = self.start_service('compute', host='test_compute1')
         self.consoleauth = self.start_service('consoleauth')
 
-        self.useFixture(cast_as_call.CastAsCall(self))
+        self.useFixture(cast_as_call.CastAsCall(self.stubs))
         self.addCleanup(nova.tests.unit.image.fake.FakeImageService_reset)
 
         self.image_id = self.api.get_images()[0]['id']

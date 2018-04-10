@@ -38,7 +38,9 @@ def main():
     utils.monkey_patch()
     objects.register_all()
     # NOTE(mriedem): This is needed for caching the nova-compute service
-    # version.
+    # version which is looked up when a server create request is made with
+    # network id of 'auto' or 'none'.
+    # TODO(mriedem): Remove this in Ocata when all computes should be Newton.
     objects.Service.enable_min_version_cache()
 
     gmr.TextGuruMeditation.setup_autorun(version)

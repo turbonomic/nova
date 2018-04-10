@@ -17,15 +17,12 @@ import random
 import time
 
 import mock
-from os_xenapi.client import host_glance
 from os_xenapi.client import XenAPI
 
 from nova.compute import utils as compute_utils
 from nova import context
 from nova import exception
-from nova.image import glance as common_glance
 from nova.tests.unit.virt.xenapi import stubs
-from nova import utils
 from nova.virt.xenapi import driver as xenapi_conn
 from nova.virt.xenapi import fake
 from nova.virt.xenapi.image import glance
@@ -124,114 +121,50 @@ class TestGlanceStore(stubs.XenAPITestBaseNoDB):
 
     def _get_upload_params(self, auto_disk_config=True,
                            expected_os_type='default'):
-        params = {}
+        params = self._get_params()
         params['vdi_uuids'] = ['fake_vdi_uuid']
         params['properties'] = {'auto_disk_config': auto_disk_config,
                                 'os_type': expected_os_type}
         return params
 
-    @mock.patch.object(utils, 'get_auto_disk_config_from_instance')
-    @mock.patch.object(common_glance, 'generate_identity_headers')
-    @mock.patch.object(vm_utils, 'get_sr_path')
-    @mock.patch.object(host_glance, 'upload_vhd')
-    def test_upload_image(self, mock_upload, mock_sr_path, mock_extra_header,
-                          mock_disk_config):
-        params = self._get_upload_params()
-        mock_upload.return_value = 'fake_upload'
-        mock_sr_path.return_value = 'fake_sr_path'
-        mock_extra_header.return_value = 'fake_extra_header'
-        mock_disk_config.return_value = 'true'
-        self.store.upload_image(self.context, self.session, self.instance,
-                                'fake_image_uuid', ['fake_vdi_uuid'])
+    def _test_upload_image(self, auto_disk_config, expected_os_type='default'):
+        params = self._get_upload_params(auto_disk_config, expected_os_type)
+        with mock.patch.object(self.session, 'call_plugin_serialized'
+                               ) as mock_call_plugin:
+            self.store.upload_image(self.context, self.session, self.instance,
+                                    'fake_image_uuid', ['fake_vdi_uuid'])
 
-        mock_sr_path.assert_called_once_with(self.session)
-        mock_extra_header.assert_called_once_with(self.context)
-        mock_upload.assert_called_once_with(
-            self.session, 0, mock.ANY, mock.ANY, 'fake_image_uuid',
-            'fake_sr_path', 'fake_extra_header', **params)
+            mock_call_plugin.assert_called_once_with('glance.py',
+                                                     'upload_vhd2',
+                                                     **params)
 
-    @mock.patch.object(utils, 'get_auto_disk_config_from_instance')
-    @mock.patch.object(common_glance, 'generate_identity_headers')
-    @mock.patch.object(vm_utils, 'get_sr_path')
-    @mock.patch.object(host_glance, 'upload_vhd')
-    def test_upload_image_None_os_type(self, mock_upload, mock_sr_path,
-                                       mock_extra_header, mock_disk_config):
+    def test_upload_image(self):
+        self._test_upload_image(True)
+
+    def test_upload_image_None_os_type(self):
         self.instance['os_type'] = None
-        mock_sr_path.return_value = 'fake_sr_path'
-        mock_extra_header.return_value = 'fake_extra_header'
-        mock_upload.return_value = 'fake_upload'
-        mock_disk_config.return_value = 'true'
-        params = self._get_upload_params(True, 'linux')
-        self.store.upload_image(self.context, self.session, self.instance,
-                                'fake_image_uuid', ['fake_vdi_uuid'])
+        self._test_upload_image(True, 'linux')
 
-        mock_sr_path.assert_called_once_with(self.session)
-        mock_extra_header.assert_called_once_with(self.context)
-        mock_upload.assert_called_once_with(
-            self.session, 0, mock.ANY, mock.ANY, 'fake_image_uuid',
-            'fake_sr_path', 'fake_extra_header', **params)
-        mock_disk_config.assert_called_once_with(self.instance)
-
-    @mock.patch.object(utils, 'get_auto_disk_config_from_instance')
-    @mock.patch.object(common_glance, 'generate_identity_headers')
-    @mock.patch.object(vm_utils, 'get_sr_path')
-    @mock.patch.object(host_glance, 'upload_vhd')
-    def test_upload_image_no_os_type(self, mock_upload, mock_sr_path,
-                                     mock_extra_header, mock_disk_config):
-        mock_sr_path.return_value = 'fake_sr_path'
-        mock_extra_header.return_value = 'fake_extra_header'
-        mock_upload.return_value = 'fake_upload'
+    def test_upload_image_no_os_type(self):
         del self.instance['os_type']
-        params = self._get_upload_params(True, 'linux')
-        self.store.upload_image(self.context, self.session, self.instance,
-                                'fake_image_uuid', ['fake_vdi_uuid'])
+        self._test_upload_image(True, 'linux')
 
-        mock_sr_path.assert_called_once_with(self.session)
-        mock_extra_header.assert_called_once_with(self.context)
-        mock_upload.assert_called_once_with(
-            self.session, 0, mock.ANY, mock.ANY, 'fake_image_uuid',
-            'fake_sr_path', 'fake_extra_header', **params)
-        mock_disk_config.assert_called_once_with(self.instance)
-
-    @mock.patch.object(common_glance, 'generate_identity_headers')
-    @mock.patch.object(vm_utils, 'get_sr_path')
-    @mock.patch.object(host_glance, 'upload_vhd')
-    def test_upload_image_auto_config_disk_disabled(
-            self, mock_upload, mock_sr_path, mock_extra_header):
-        mock_sr_path.return_value = 'fake_sr_path'
-        mock_extra_header.return_value = 'fake_extra_header'
-        mock_upload.return_value = 'fake_upload'
+    def test_upload_image_auto_config_disk_disabled(self):
         sys_meta = [{"key": "image_auto_disk_config", "value": "Disabled"}]
         self.instance["system_metadata"] = sys_meta
-        params = self._get_upload_params("disabled")
-        self.store.upload_image(self.context, self.session, self.instance,
-                                'fake_image_uuid', ['fake_vdi_uuid'])
+        self._test_upload_image("disabled")
 
-        mock_sr_path.assert_called_once_with(self.session)
-        mock_extra_header.assert_called_once_with(self.context)
-        mock_upload.assert_called_once_with(
-            self.session, 0, mock.ANY, mock.ANY, 'fake_image_uuid',
-            'fake_sr_path', 'fake_extra_header', **params)
-
-    @mock.patch.object(common_glance, 'generate_identity_headers')
-    @mock.patch.object(vm_utils, 'get_sr_path')
-    @mock.patch.object(host_glance, 'upload_vhd')
-    def test_upload_image_raises_exception(self, mock_upload, mock_sr_path,
-                                           mock_extra_header):
-
-        mock_sr_path.return_value = 'fake_sr_path'
-        mock_extra_header.return_value = 'fake_extra_header'
-        mock_upload.side_effect = RuntimeError
+    def test_upload_image_raises_exception(self):
         params = self._get_upload_params()
-        self.assertRaises(RuntimeError, self.store.upload_image,
-                          self.context, self.session, self.instance,
-                          'fake_image_uuid', ['fake_vdi_uuid'])
+        with mock.patch.object(self.session, 'call_plugin_serialized',
+                               side_effect=RuntimeError) as mock_call_plugin:
+            self.assertRaises(RuntimeError, self.store.upload_image,
+                              self.context, self.session, self.instance,
+                              'fake_image_uuid', ['fake_vdi_uuid'])
 
-        mock_sr_path.assert_called_once_with(self.session)
-        mock_extra_header.assert_called_once_with(self.context)
-        mock_upload.assert_called_once_with(
-            self.session, 0, mock.ANY, mock.ANY, 'fake_image_uuid',
-            'fake_sr_path', 'fake_extra_header', **params)
+            mock_call_plugin.assert_called_once_with('glance.py',
+                                                     'upload_vhd2',
+                                                     **params)
 
     @mock.patch.object(time, 'sleep')
     @mock.patch.object(compute_utils, 'add_instance_fault_from_exc')
@@ -239,11 +172,10 @@ class TestGlanceStore(stubs.XenAPITestBaseNoDB):
                                                         mock_add_inst,
                                                         mock_time_sleep):
         self.flags(num_retries=2, group='glance')
-        params = self._get_params()
-        params.update(self._get_upload_params())
+        params = self._get_upload_params()
 
         error_details = ["", "", "RetryableError", ""]
-        error = XenAPI.Failure(details=error_details)
+        error = self.session.XenAPI.Failure(details=error_details)
 
         with mock.patch.object(self.session, 'call_plugin_serialized',
                                side_effect=error) as mock_call_plugin:
@@ -274,11 +206,10 @@ class TestGlanceStore(stubs.XenAPITestBaseNoDB):
                                                       mock_add_inst,
                                                       mock_time_sleep):
         self.flags(num_retries=2, group='glance')
-        params = self._get_params()
-        params.update(self._get_upload_params())
+        params = self._get_upload_params()
 
         error_details = ["", "task signaled", "", ""]
-        error = XenAPI.Failure(details=error_details)
+        error = self.session.XenAPI.Failure(details=error_details)
 
         # Note(johngarbutt) XenServer 6.1 and later has this error
         error_details_v61 = ["", "signal: SIGTERM", "", ""]

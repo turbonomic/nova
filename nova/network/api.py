@@ -301,7 +301,7 @@ class API(base_api.NetworkAPI):
     # NOTE(danms): Here for neutron compatibility
     def allocate_port_for_instance(self, context, instance, port_id,
                                    network_id=None, requested_ip=None,
-                                   bind_host_id=None, tag=None):
+                                   bind_host_id=None):
         raise NotImplementedError()
 
     # NOTE(danms): Here for neutron compatibility
@@ -364,6 +364,11 @@ class API(base_api.NetworkAPI):
             else:
                 objects.Network.associate(context, project,
                                           network_id=network.id, force=True)
+
+    def get_instance_nw_info(self, context, instance, **kwargs):
+        """Returns all network info related to an instance."""
+        return super(API, self).get_instance_nw_info(context, instance,
+                                                     **kwargs)
 
     def _get_instance_nw_info(self, context, instance, **kwargs):
         """Returns all network info related to an instance."""

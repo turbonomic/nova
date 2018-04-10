@@ -26,7 +26,8 @@ class DriverMethodTestCase(test.NoDBTestCase):
         self.CONF = self.useFixture(fixture_config.Config()).conf
 
     def test_is_xenapi_true(self):
-        self.CONF.set_override('compute_driver', 'xenapi.XenAPIDriver')
+        self.CONF.set_override('compute_driver', 'xenapi.XenAPIDriver',
+                               enforce_type=True)
         self.assertTrue(driver.is_xenapi())
 
     def test_is_xenapi_false(self):
@@ -34,5 +35,6 @@ class DriverMethodTestCase(test.NoDBTestCase):
                         'ironic.IronicDriver', 'vmwareapi.VMwareVCDriver',
                         'hyperv.HyperVDriver', None)
         for driver_name in driver_names:
-            self.CONF.set_override('compute_driver', driver_name)
+            self.CONF.set_override('compute_driver', driver_name,
+                                   enforce_type=True)
             self.assertFalse(driver.is_xenapi())

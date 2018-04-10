@@ -170,7 +170,7 @@ class SortParamUtilsTest(test.NoDBTestCase):
         self.assertEqual(['desc'], sort_dirs)
 
     def test_get_sort_params_override_defaults(self):
-        '''Verifies that the defaults can be overridden.'''
+        '''Verifies that the defaults can be overriden.'''
         sort_keys, sort_dirs = common.get_sort_params({}, default_key='key1',
                                                       default_dir='dir1')
         self.assertEqual(['key1'], sort_keys)
@@ -593,11 +593,6 @@ class ViewBuilderLinkTest(test.NoDBTestCase):
     def test_get_project_id(self):
         proj_id = self.vb._get_project_id(self.request)
         self.assertEqual(self.project_id, proj_id)
-
-    def test_get_project_id_with_none_project_id(self):
-        self.request.environ["nova.context"].project_id = None
-        proj_id = self.vb._get_project_id(self.request)
-        self.assertEqual('', proj_id)
 
     def test_get_next_link(self):
         identifier = "identifier"

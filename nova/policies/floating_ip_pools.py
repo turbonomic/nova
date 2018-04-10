@@ -19,19 +19,16 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-floating-ip-pools'
+POLICY_ROOT = 'os_compute_api:os-floating-ip-pools:%s'
 
 
 floating_ip_pools_policies = [
-    policy.DocumentedRuleDefault(
-        BASE_POLICY_NAME,
-        base.RULE_ADMIN_OR_OWNER,
-        "List floating IP pools. This API is deprecated.",
-        [
-            {
-                'method': 'GET',
-                'path': '/os-floating-ip-pools'
-            }
-        ]),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    policy.RuleDefault(
+        name=BASE_POLICY_NAME,
+        check_str=base.RULE_ADMIN_OR_OWNER),
 ]
 
 

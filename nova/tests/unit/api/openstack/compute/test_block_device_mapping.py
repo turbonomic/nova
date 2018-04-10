@@ -40,6 +40,11 @@ class BlockDeviceMappingTestV21(test.TestCase):
         ext_info = extension_info.LoadedExtensionInfo()
         self.controller = servers_v21.ServersController(
                                         extension_info=ext_info)
+        CONF.set_override('extensions_blacklist', 'os-block-device-mapping',
+                          'osapi_v21')
+        self.no_bdm_v2_controller = servers_v21.ServersController(
+                extension_info=ext_info)
+        CONF.set_override('extensions_blacklist', '', 'osapi_v21')
 
     def setUp(self):
         super(BlockDeviceMappingTestV21, self).setUp()
@@ -72,7 +77,7 @@ class BlockDeviceMappingTestV21(test.TestCase):
             del body['server']['imageRef']
         return body
 
-    def _test_create(self, params, no_image=False):
+    def _test_create(self, params, no_image=False, override_controller=None):
         body = self._get_servers_body(no_image)
         body['server'].update(params)
 
@@ -81,7 +86,26 @@ class BlockDeviceMappingTestV21(test.TestCase):
         req.headers['content-type'] = 'application/json'
 
         req.body = jsonutils.dump_as_bytes(body)
-        self.controller.create(req, body=body).obj['server']
+
+        if override_controller:
+            override_controller.create(req, body=body).obj['server']
+        else:
+            self.controller.create(req, body=body).obj['server']
+
+    def test_create_instance_with_block_device_mapping_disabled(self):
+        bdm = [{'device_name': 'foo'}]
+
+        old_create = compute_api.API.create
+
+        def create(*args, **kwargs):
+            self.assertNotIn('block_device_mapping', kwargs)
+            return old_create(*args, **kwargs)
+
+        self.stub_out('nova.compute.api.API.create', create)
+
+        params = {block_device_mapping.ATTRIBUTE_NAME: bdm}
+        self._test_create(params,
+                          override_controller=self.no_bdm_v2_controller)
 
     def test_create_instance_with_volumes_enabled_no_image(self):
         """Test that the create will fail if there is no image

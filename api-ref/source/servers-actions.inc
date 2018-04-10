@@ -1,4 +1,6 @@
 .. -*- rst -*-
+.. needs:parameter_verification
+.. needs:example_verification
 .. needs:body_verification
 
 ===========================================
@@ -12,9 +14,8 @@ You can associate a fixed or floating IP address with a server,
 or disassociate a fixed or floating IP address from a server.
 You can attach a volume to a server.
 
-You can create an image from a server, create a backup of a server,
-evacuate a server from a failed host to a new host, and force-delete a
-server before deferred cleanup.
+You can create an image from a server, evacuate a server from a failed
+host to a new host, and force-delete a server before deferred cleanup.
 You can lock, pause, reboot, rebuild, rescue, resize, resume, confirm
 the resize of, revert a pending resize for, shelve, shelf-offload,
 unshelve, start, stop, unlock, unpause, and unrescue a server. You can
@@ -24,12 +25,8 @@ into a server since Mitaka release.
 
 You can get an RDP, serial, SPICE, or VNC console for a server.
 
-Add (Associate) Floating Ip (addFloatingIp Action) (DEPRECATED)
-================================================================
-
-.. warning:: This API is deprecated and will fail with a 404 starting
-             from microversion 2.44. This is replaced with using the
-             Neutron networking service API.
+Add (Associate) Floating Ip (addFloatingIp Action)
+==================================================
 
 .. rest_method:: POST /servers/{server_id}/action
 
@@ -52,7 +49,7 @@ optional ``fixed_address`` parameter.
 
 The server must exist.
 
-You can only add a floating IP address to the server when its status is ``ACTIVE`` or ``STOPPED``
+You can only add a floating IP address to the server when its status is ``available``.
 
 Normal response codes: 202
 
@@ -71,8 +68,8 @@ Request
 
 **Example Add (Associate) Floating Ip (addFloatingIp Action)**
 
-.. literalinclude:: ../../doc/api_samples/servers/server-action-addfloatingip-req.json
-   :language: javascript
+.. literalinclude:: ../../doc/api_samples/servers/server-action-addfloatingip.json
+  :language: javascript
 
 Response
 --------
@@ -137,9 +134,9 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
+
   - server_id: server_id_path
   - changePassword: changePassword
-  - adminPass: adminPass_change_password
 
 **Example Change Administrative Password (changePassword Action)**
 
@@ -206,61 +203,6 @@ Response
 If successful, this method does not return content in the response body.
 
 
-Create Server Back Up (createBackup Action)
-===========================================
-
-.. rest_method:: POST /servers/{server_id}/action
-
-Creates a back up of a server.
-
-.. note:: This API is not supported for volume-backed instances.
-
-Specify the ``createBackup`` action in the request body.
-
-Policy defaults enable only users with the administrative role or the
-owner of the server to perform this operation. Cloud providers can
-change these permissions through the ``policy.json`` file.
-
-.. note::
-    Starting from version 2.39 the image quota enforcement with Nova `metadata`
-    is removed and quota checks should be performed using Glance API directly.
-
-Normal response codes: 202
-
-Error response codes: badRequest(400), unauthorized(401), forbidden(403),
-itemNotFound(404), conflict(409)
-
-Request
--------
-
-.. rest_parameters:: parameters.yaml
-
-  - server_id: server_id_path
-  - createBackup: createBackup
-  - name: backup_name
-  - backup_type: backup_type
-  - rotation: backup_rotation
-  - metadata: metadata
-
-**Example Create Server Back Up (createBackup Action)**
-
-.. literalinclude:: ../../doc/api_samples/os-create-backup/create-backup-req.json
-   :language: javascript
-
-Response
---------
-
-.. rest_parameters:: parameters.yaml
-
-  - Location: image_location
-  - image_id: snapshot_id_resp_2_45
-
-**Example Create Server Back Up (v2.45)**
-
-.. literalinclude:: ../../doc/api_samples/os-create-backup/v2.45/create-backup-resp.json
-   :language: javascript
-
-
 Create Image (createImage Action)
 =================================
 
@@ -317,10 +259,9 @@ Request
 
 .. rest_parameters:: parameters.yaml
 
+
   - server_id: server_id_path
   - createImage: createImage
-  - name: image_name
-  - metadata: image_metadata
 
 **Example Create Image (createImage Action)**
 
@@ -332,13 +273,7 @@ Response
 
 .. rest_parameters:: parameters.yaml
 
-  - Location: image_location
-  - image_id: snapshot_id_resp_2_45
-
-**Example Create Image (v2.45)**
-
-.. literalinclude:: ../../doc/api_samples/servers/v2.45/server-action-create-image-resp.json
-   :language: javascript
+  - image_location: image_location
 
 
 Lock Server (lock Action)
@@ -436,7 +371,6 @@ Request
 
   - server_id: server_id_path
   - reboot: reboot
-  - type: reboot_type
 
 **Example Reboot Server (reboot Action)**
 
@@ -473,77 +407,30 @@ Request
 
   - server_id: server_id_path
   - rebuild: rebuild
-  - imageRef: imageRef_rebuild
-  - accessIPv4: accessIPv4_in
-  - accessIPv6: accessIPv6_in
+  - imageRef: imageRef
+  - name: server_name_optional
   - adminPass: adminPass_request
   - metadata: metadata
-  - name: server_name_optional
-  - OS-DCF:diskConfig: OS-DCF:diskConfig
   - personality: personality
-  - personality.path: path
-  - personality.contents: contents
   - preserve_ephemeral: preserve_ephemeral
-  - description: server_description
 
-**Example Rebuild Server (rebuild Action) (v2.47)**
+**Example Rebuild Server (rebuild Action)**
 
-.. literalinclude:: ../../doc/api_samples/servers/v2.47/server-action-rebuild.json
+Preserving the ephemeral disk
+
+.. literalinclude:: ../../doc/api_samples/servers/server-action-rebuild-preserve-ephemeral.json
    :language: javascript
 
 Response
 --------
 
-.. rest_parameters:: parameters.yaml
+**Example Rebuild Server (rebuild Action)**
 
-  - Location: server_location
-  - server: server
-  - accessIPv4: accessIPv4
-  - accessIPv6: accessIPv6
-  - addresses: addresses_obj
-  - adminPass: adminPass_response
-  - created: created
-  - flavor: flavor_server
-  - flavor.id: flavor_id_body_2_46
-  - flavor.links: flavor_links_2_46
-  - flavor.vcpus: flavor_cpus_2_47
-  - flavor.ram: flavor_ram_2_47
-  - flavor.disk: flavor_disk_2_47
-  - flavor.ephemeral: flavor_ephem_disk_2_47
-  - flavor.swap: flavor_swap_2_47
-  - flavor.original_name: flavor_original_name
-  - flavor.extra_specs: extra_specs_2_47
-  - flavor.extra_specs.key: flavor_extra_spec_key_2_47
-  - flavor.extra_specs.value: flavor_extra_spec_value_2_47
-  - hostId: hostId
-  - id: server_id
-  - image: image
-  - image.id: image_id_body
-  - image.links: links
-  - links: server_links
-  - metadata: metadata_object
-  - name: server_name
-  - OS-DCF:diskConfig: disk_config
-  - progress: progress
-  - status: server_status
-  - tenant_id: tenant_id_body
-  - updated: updated
-  - user_id: user_id
-  - locked: locked
-  - description: server_description_resp
-  - tags: tags
-
-**Example Rebuild Server (rebuild Action) (v2.47)**
-
-.. literalinclude:: ../../doc/api_samples/servers/v2.47/server-action-rebuild-resp.json
+.. literalinclude:: ../../doc/api_samples/servers/server-action-rebuild-resp.json
    :language: javascript
 
-Remove (Disassociate) Floating Ip (removeFloatingIp Action) (DEPRECATED)
-=========================================================================
-
-.. warning:: This API is deprecated and will fail with a 404 starting
-             from microversion 2.44. This is replaced with using the
-             Neutron networking service API.
+Remove (Disassociate) Floating Ip (removeFloatingIp Action)
+===========================================================
 
 .. rest_method:: POST /servers/{server_id}/action
 
@@ -570,10 +457,11 @@ Request
   - removeFloatingIp: removeFloatingIp
   - address: address
 
-**Example Remove (Disassociate) Floating Ip (removeFloatingIp Action)**
+.. TODO(sdague) build example for this
+   **Example Remove (Disassociate) Floating Ip (removeFloatingIp Action)**
 
-.. literalinclude:: ../../doc/api_samples/servers/server-action-removefloatingip-req.json
-   :language: javascript
+   .. literalinclude:: ../../doc/api_samples/servers-action/removeFloatingIp-req.json
+                       :language: javascript
 
 Response
 --------
@@ -648,9 +536,9 @@ Request
   - adminPass: adminPass_rescue_request
   - rescue_image_ref: rescue_image_ref
 
-**Example Rescue server (rescue Action)**
+**Example Rescue server**
 
-.. literalinclude:: ../../doc/api_samples/os-rescue/server-rescue-req-with-image-ref.json
+.. literalinclude:: ../../doc/api_samples/os-rescue/server-rescue-req.json
    :language: javascript
 
 Response
@@ -660,7 +548,7 @@ Response
 
   - adminPass: adminPass_response
 
-**Example Rescue server (rescue Action)**
+**Example Extended rescue server**
 
 .. literalinclude:: ../../doc/api_samples/os-rescue/server-rescue.json
    :language: javascript
@@ -699,8 +587,6 @@ Request
 
   - server_id: server_id_path
   - resize: resize
-  - flavorRef: flavorRef_resize
-  - OS-DCF:diskConfig: OS-DCF:diskConfig
 
 **Example Resize Server (Resize Action)**
 

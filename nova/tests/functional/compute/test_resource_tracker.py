@@ -49,8 +49,7 @@ class IronicResourceTrackerTest(test.TestCase):
             root_gb=1024,
             swap=0,
             ephemeral_gb=0,
-            extra_specs={},
-    ),
+        ),
         'CUSTOM_BIG_IRON': objects.Flavor(
             name='CUSTOM_BIG_IRON',
             flavorid=43,
@@ -59,7 +58,6 @@ class IronicResourceTrackerTest(test.TestCase):
             root_gb=1024,
             swap=0,
             ephemeral_gb=0,
-            extra_specs={},
         ),
     }
 
@@ -125,7 +123,6 @@ class IronicResourceTrackerTest(test.TestCase):
             task_state=task_states.SPAWNING,
             power_state=power_state.RUNNING,
             project_id='project',
-            user_id=uuids.user,
         ),
     }
 
@@ -148,7 +145,6 @@ class IronicResourceTrackerTest(test.TestCase):
         self.driver_mock = driver
         self.rt = resource_tracker.ResourceTracker(COMPUTE_HOST, driver)
         self.rt.scheduler_client.reportclient = self.report_client
-        self.rt.reportclient = self.report_client
         self.url = 'http://localhost/placement'
         self.create_fixtures()
 
@@ -290,17 +286,12 @@ class IronicResourceTrackerTest(test.TestCase):
                 self.assertEqual(3, len(inv))
 
             # Now "spawn" an instance to the first compute node by calling the
-            # RT's instance_claim().
+            # RT's instance_claim(), which should, in the case of an Ironic
+            # instance, grab the full compute node for the instance and write
+            # allocation records for VCPU, MEMORY_MB, and DISK_GB
             cn1_obj = self.COMPUTE_NODE_FIXTURES[uuids.cn1]
             cn1_nodename = cn1_obj.hypervisor_hostname
             inst = self.INSTANCE_FIXTURES[uuids.instance1]
-            # Since we're pike, the scheduler would have created our
-            # allocation for us. So, we can use our old update routine
-            # here to mimic that before we go do the compute RT claim,
-            # and then the checks below.
-            self.rt.reportclient.update_instance_allocation(cn1_obj,
-                                                            inst,
-                                                            1)
             with self.rt.instance_claim(self.ctx, inst, cn1_nodename):
                 pass
 

@@ -27,7 +27,3 @@ class Driver(object):
     def is_up(self, member):
         """Check whether the given member is up."""
         raise NotImplementedError()
-
-    def updated_time(self, service_ref):
-        """Get the updated time"""
-        raise NotImplementedError()

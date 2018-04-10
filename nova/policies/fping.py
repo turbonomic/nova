@@ -23,38 +23,15 @@ POLICY_ROOT = 'os_compute_api:os-fping:%s'
 
 
 fping_policies = [
-    policy.DocumentedRuleDefault(
-        POLICY_ROOT % 'all_tenants',
-        base.RULE_ADMIN_API,
-        """Pings instances for all projects and reports which instances
-are alive.
-
-os-fping API is deprecated as this works only with nova-network
-which itself is deprecated.""",
-        [
-            {
-                'method': 'GET',
-                'path': '/os-fping?all_tenants=true'
-            }
-        ]),
-    policy.DocumentedRuleDefault(
-        BASE_POLICY_NAME,
-        base.RULE_ADMIN_OR_OWNER,
-        """Pings instances, particular instance and reports which instances
-are alive.
-
-os-fping API is deprecated as this works only with nova-network
-which itself is deprecated.""",
-        [
-            {
-                'method': 'GET',
-                'path': '/os-fping'
-            },
-            {
-                'method': 'GET',
-                'path': '/os-fping/{instance_id}'
-            }
-        ])
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'all_tenants',
+        check_str=base.RULE_ADMIN_API),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    policy.RuleDefault(
+        name=BASE_POLICY_NAME,
+        check_str=base.RULE_ADMIN_OR_OWNER),
 ]
 
 

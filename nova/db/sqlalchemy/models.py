@@ -81,12 +81,10 @@ class Service(BASE, NovaBase, models.SoftDeleteMixin):
         schema.UniqueConstraint("host", "topic", "deleted",
                                 name="uniq_services0host0topic0deleted"),
         schema.UniqueConstraint("host", "binary", "deleted",
-                                name="uniq_services0host0binary0deleted"),
-        Index('services_uuid_idx', 'uuid', unique=True),
-    )
+                                name="uniq_services0host0binary0deleted")
+        )
 
     id = Column(Integer, primary_key=True)
-    uuid = Column(String(36), nullable=True)
     host = Column(String(255))  # , ForeignKey('hosts.id'))
     binary = Column(String(255))
     topic = Column(String(255))
@@ -112,7 +110,6 @@ class ComputeNode(BASE, NovaBase, models.SoftDeleteMixin):
 
     __tablename__ = 'compute_nodes'
     __table_args__ = (
-        Index('compute_nodes_uuid_idx', 'uuid', unique=True),
         schema.UniqueConstraint(
             'host', 'hypervisor_hostname', 'deleted',
             name="uniq_compute_nodes0host0hypervisor_hostname0deleted"),
@@ -180,7 +177,6 @@ class ComputeNode(BASE, NovaBase, models.SoftDeleteMixin):
     ram_allocation_ratio = Column(Float, nullable=True)
     cpu_allocation_ratio = Column(Float, nullable=True)
     disk_allocation_ratio = Column(Float, nullable=True)
-    mapped = Column(Integer, nullable=True, default=0)
 
 
 class Certificate(BASE, NovaBase, models.SoftDeleteMixin):
@@ -1424,7 +1420,7 @@ class PciDevice(BASE, NovaBase, models.SoftDeleteMixin):
             name="uniq_pci_devices0compute_node_id0address0deleted")
     )
     id = Column(Integer, primary_key=True)
-    uuid = Column(String(36))
+
     compute_node_id = Column(Integer, ForeignKey('compute_nodes.id'),
                              nullable=False)
 

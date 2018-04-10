@@ -30,6 +30,7 @@ from nova.i18n import _
 from nova.policies import migrate_server as ms_policies
 
 LOG = logging.getLogger(__name__)
+ALIAS = "os-migrate-server"
 
 
 class MigrateServerController(wsgi.Controller):
@@ -63,7 +64,7 @@ class MigrateServerController(wsgi.Controller):
     @wsgi.response(202)
     @extensions.expected_errors((400, 404, 409))
     @wsgi.action('os-migrateLive')
-    @validation.schema(migrate_server.migrate_live, "2.0", "2.24")
+    @validation.schema(migrate_server.migrate_live, "2.1", "2.24")
     @validation.schema(migrate_server.migrate_live_v2_25, "2.25", "2.29")
     @validation.schema(migrate_server.migrate_live_v2_30, "2.30")
     def _migrate_live(self, req, id, body):
@@ -100,6 +101,7 @@ class MigrateServerController(wsgi.Controller):
             raise exc.HTTPNotFound(explanation=e.format_message())
         except (exception.NoValidHost,
                 exception.ComputeServiceUnavailable,
+                exception.ComputeHostNotFound,
                 exception.InvalidHypervisorType,
                 exception.InvalidCPUInfo,
                 exception.UnableToMigrateToSelf,
@@ -118,8 +120,6 @@ class MigrateServerController(wsgi.Controller):
                 raise exc.HTTPBadRequest(explanation=ex.format_message())
         except exception.InstanceIsLocked as e:
             raise exc.HTTPConflict(explanation=e.format_message())
-        except exception.ComputeHostNotFound as e:
-            raise exc.HTTPBadRequest(explanation=e.format_message())
         except exception.InstanceInvalidState as state_error:
             common.raise_http_conflict_for_instance_invalid_state(state_error,
                     'os-migrateLive', id)
@@ -131,3 +131,19 @@ class MigrateServerController(wsgi.Controller):
             message = _("Can't force to a non-provided destination")
             raise exc.HTTPBadRequest(explanation=message)
         return force
+
+
+class MigrateServer(extensions.V21APIExtensionBase):
+    """Enable migrate and live-migrate server actions."""
+
+    name = "MigrateServer"
+    alias = ALIAS
+    version = 1
+
+    def get_controller_extensions(self):
+        controller = MigrateServerController()
+        extension = extensions.ControllerExtension(self, 'servers', controller)
+        return [extension]
+
+    def get_resources(self):
+        return []

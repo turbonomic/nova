@@ -11,7 +11,6 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-import copy
 
 from nova.objects import external_event as external_event_obj
 
@@ -28,12 +27,7 @@ create = {
                     },
                     'name': {
                         'type': 'string',
-                        'enum': [
-                            'network-changed',
-                            'network-vif-plugged',
-                            'network-vif-unplugged',
-                            'network-vif-deleted'
-                        ],
+                        'enum': external_event_obj.EVENT_NAMES
                     },
                     'status': {
                        'type': 'string',
@@ -51,7 +45,3 @@ create = {
     'required': ['events'],
     'additionalProperties': False,
 }
-
-create_v251 = copy.deepcopy(create)
-name = create_v251['properties']['events']['items']['properties']['name']
-name['enum'].append('volume-extended')

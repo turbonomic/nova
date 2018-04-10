@@ -43,12 +43,13 @@ import nova.conf
 from nova.console import type as ctype
 from nova import context as nova_context
 from nova import exception
-from nova.i18n import _
+from nova.i18n import _, _LE, _LI, _LW
 from nova import network
 from nova import objects
 from nova import utils
 from nova import version
 from nova.virt import configdrive
+from nova.virt import diagnostics
 from nova.virt import driver
 from nova.virt import hardware
 from nova.virt.vmwareapi import constants
@@ -176,7 +177,7 @@ class VMwareVMOps(object):
             self._session._wait_for_task(vmdk_extend_task)
         except Exception as e:
             with excutils.save_and_reraise_exception():
-                LOG.error('Extending virtual disk failed with error: %s',
+                LOG.error(_LE('Extending virtual disk failed with error: %s'),
                           e, instance=instance)
                 # Clean up files created during the extend operation
                 files = [name.replace(".vmdk", "-flat.vmdk"), name]
@@ -392,7 +393,7 @@ class VMwareVMOps(object):
             host, cookies = self._get_esx_host_and_cookies(vi.datastore,
                 dc_path, image_ds_loc.rel_path)
         except Exception as e:
-            LOG.warning("Get esx cookies failed: %s", e,
+            LOG.warning(_LW("Get esx cookies failed: %s"), e,
                         instance=vi.instance)
             dc_path = vutil.get_inventory_path(session.vim, vi.dc_info.ref)
 
@@ -507,8 +508,8 @@ class VMwareVMOps(object):
             # due to action external to the process.
             # In the event of a FileAlreadyExists we continue,
             # all other exceptions will be raised.
-            LOG.warning("Destination %s already exists! Concurrent moves "
-                        "can lead to unexpected results.",
+            LOG.warning(_LW("Destination %s already exists! Concurrent moves "
+                            "can lead to unexpected results."),
                         dst_folder_ds_path)
 
     def _cache_sparse_image(self, vi, tmp_image_ds_loc):
@@ -833,7 +834,7 @@ class VMwareVMOps(object):
                       CONF.config_drive_format)
             raise exception.InstancePowerOnFailure(reason=reason)
 
-        LOG.info('Using config drive for instance', instance=instance)
+        LOG.info(_LI('Using config drive for instance'), instance=instance)
         extra_md = {}
         if admin_password:
             extra_md['admin_pass'] = admin_password
@@ -861,7 +862,7 @@ class VMwareVMOps(object):
                     return upload_iso_path
         except Exception as e:
             with excutils.save_and_reraise_exception():
-                LOG.error('Creating config drive failed with error: %s',
+                LOG.error(_LE('Creating config drive failed with error: %s'),
                           e, instance=instance)
 
     def _attach_cdrom_to_vm(self, vm_ref, instance,
@@ -941,7 +942,8 @@ class VMwareVMOps(object):
                                 name=vm_name,
                                 spec=clone_spec)
         self._session._wait_for_task(vm_clone_task)
-        LOG.info("Created linked-clone VM from snapshot", instance=instance)
+        LOG.info(_LI("Created linked-clone VM from snapshot"),
+                 instance=instance)
         task_info = self._session._call_method(vutil,
                                                "get_object_property",
                                                vm_clone_task,
@@ -1076,9 +1078,9 @@ class VMwareVMOps(object):
                                            "UnregisterVM", vm_ref)
                 LOG.debug("Unregistered the VM", instance=instance)
             except Exception as excep:
-                LOG.warning("In vmwareapi:vmops:_destroy_instance, got "
-                            "this exception while un-registering the VM: %s",
-                            excep, instance=instance)
+                LOG.warning(_LW("In vmwareapi:vmops:_destroy_instance, got "
+                                "this exception while un-registering the VM: "
+                                "%s"), excep, instance=instance)
             # Delete the folder holding the VM related content on
             # the datastore.
             if destroy_disks and vm_ds_path:
@@ -1099,15 +1101,16 @@ class VMwareVMOps(object):
                               {'datastore_name': vm_ds_path.datastore},
                               instance=instance)
                 except Exception:
-                    LOG.warning("In vmwareapi:vmops:_destroy_instance, "
-                                "exception while deleting the VM contents "
-                                "from the disk",
+                    LOG.warning(_LW("In vmwareapi:vmops:_destroy_instance, "
+                                    "exception while deleting the VM contents "
+                                    "from the disk"),
                                 exc_info=True, instance=instance)
         except exception.InstanceNotFound:
-            LOG.warning('Instance does not exist on backend',
+            LOG.warning(_LW('Instance does not exist on backend'),
                         instance=instance)
         except Exception:
-            LOG.exception(_('Destroy instance failed'), instance=instance)
+            LOG.exception(_LE('Destroy instance failed'),
+                          instance=instance)
         finally:
             vm_util.vm_ref_cache_delete(instance.uuid)
 
@@ -1236,7 +1239,7 @@ class VMwareVMOps(object):
             rescue_device = self._get_rescue_device(instance, vm_ref)
         except exception.NotFound:
             with excutils.save_and_reraise_exception():
-                LOG.error('Unable to access the rescue disk',
+                LOG.error(_LE('Unable to access the rescue disk'),
                           instance=instance)
         vm_util.power_off_instance(self._session, instance, vm_ref)
         self._volumeops.detach_disk_from_vm(vm_ref, instance, rescue_device,
@@ -1486,11 +1489,11 @@ class VMwareVMOps(object):
                 timeout=timeout)
 
         if instances_info["instance_count"] > 0:
-            LOG.info("Found %(instance_count)d hung reboots "
-                     "older than %(timeout)d seconds", instances_info)
+            LOG.info(_LI("Found %(instance_count)d hung reboots "
+                         "older than %(timeout)d seconds"), instances_info)
 
         for instance in instances:
-            LOG.info("Automatically hard rebooting", instance=instance)
+            LOG.info(_LI("Automatically hard rebooting"), instance=instance)
             self.compute_api.reboot(ctxt, instance, "HARD")
 
     def get_info(self, instance):
@@ -1546,14 +1549,13 @@ class VMwareVMOps(object):
             state = power_state.STATE_MAP[constants.POWER_STATES[state]]
         uptime = data.get('uptimeSeconds', 0)
         config_drive = configdrive.required_by(instance)
-        diags = objects.Diagnostics(state=state,
-                                    driver='vmwareapi',
-                                    config_drive=config_drive,
-                                    hypervisor_os='esxi',
-                                    uptime=uptime)
-        diags.memory_details = objects.MemoryDiagnostics(
-            maximum = data.get('memorySizeMB', 0),
-            used=data.get('guestMemoryUsage', 0))
+        diags = diagnostics.Diagnostics(state=state,
+                                        driver='vmwareapi',
+                                        config_drive=config_drive,
+                                        hypervisor_os='esxi',
+                                        uptime=uptime)
+        diags.memory_details.maximum = data.get('memorySizeMB', 0)
+        diags.memory_details.used = data.get('guestMemoryUsage', 0)
         # TODO(garyk): add in cpu, nic and disk stats
         return diags
 
@@ -1761,7 +1763,8 @@ class VMwareVMOps(object):
                 vm_util.reconfigure_vm(self._session, vm_ref,
                                        attach_config_spec)
             except Exception as e:
-                LOG.error('Attaching network adapter failed. Exception: %s',
+                LOG.error(_LE('Attaching network adapter failed. Exception: '
+                              '%s'),
                           e, instance=instance)
                 raise exception.InterfaceAttachFailed(
                         instance_uuid=instance.uuid)
@@ -1809,7 +1812,8 @@ class VMwareVMOps(object):
                 vm_util.reconfigure_vm(self._session, vm_ref,
                                        detach_config_spec)
             except Exception as e:
-                LOG.error('Detaching network adapter failed. Exception: %s',
+                LOG.error(_LE('Detaching network adapter failed. Exception: '
+                              '%s'),
                           e, instance=instance)
                 raise exception.InterfaceDetachFailed(
                         instance_uuid=instance.uuid)
@@ -1879,11 +1883,14 @@ class VMwareVMOps(object):
                             str(vi.cache_image_path),
                             str(sized_disk_ds_loc))
                 except Exception as e:
-                    LOG.warning("Root disk file creation failed - %s",
+                    LOG.warning(_LW("Root disk file creation "
+                                    "failed - %s"),
                                 e, instance=vi.instance)
                     with excutils.save_and_reraise_exception():
-                        LOG.error('Failed to copy cached image %(source)s to '
-                                  '%(dest)s for resize: %(error)s',
+                        LOG.error(_LE('Failed to copy cached '
+                                      'image %(source)s to '
+                                      '%(dest)s for resize: '
+                                      '%(error)s'),
                                   {'source': vi.cache_image_path,
                                    'dest': sized_disk_ds_loc,
                                    'error': e},

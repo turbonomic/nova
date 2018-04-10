@@ -13,15 +13,12 @@
 # under the License.
 
 from keystoneauth1 import exceptions as kse
-from keystoneauth1 import loading as ks_loading
+from keystoneauth1 import session
 from oslo_log import log as logging
 import webob
 
-import nova.conf
 from nova.i18n import _
 
-
-CONF = nova.conf.CONF
 LOG = logging.getLogger(__name__)
 
 
@@ -32,30 +29,15 @@ def verify_project_id(context, project_id):
     an HTTPBadRequest is emitted.
 
     """
-    sess = ks_loading.load_session_from_conf_options(
-        CONF, 'keystone', auth=context.get_auth_plugin())
-
-    failure = webob.exc.HTTPBadRequest(
-            explanation=_("Project ID %s is not a valid project.") %
-            project_id)
+    sess = session.Session(auth=context.get_auth_plugin())
     try:
-        resp = sess.get('/projects/%s' % project_id,
-                        endpoint_filter={
-                            'service_type': 'identity',
-                            'version': (3, 0)
-                        },
+        resp = sess.get('/v3/projects/%s' % project_id,
+                        endpoint_filter={'service_type': 'identity'},
                         raise_exc=False)
-    except kse.EndpointNotFound:
-        LOG.error(
-            "Keystone identity service version 3.0 was not found. This might "
-            "be because your endpoint points to the v2.0 versioned endpoint "
-            "which is not supported. Please fix this.")
-        raise failure
     except kse.ClientException:
         # something is wrong, like there isn't a keystone v3 endpoint,
-        # or nova isn't configured for the interface to talk to it;
         # we'll take the pass and default to everything being ok.
-        LOG.info("Unable to contact keystone to verify project_id")
+        LOG.exception("Unable to contact keystone to verify project_id")
         return True
 
     if resp:
@@ -63,7 +45,9 @@ def verify_project_id(context, project_id):
         return True
     elif resp.status_code == 404:
         # we got access, and we know this project is not there
-        raise failure
+        raise webob.exc.HTTPBadRequest(
+            explanation=_("Project ID %s is not a valid project.") %
+            project_id)
     elif resp.status_code == 403:
         # we don't have enough permission to verify this, so default
         # to "it's ok".

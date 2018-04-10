@@ -62,15 +62,6 @@ class IDEDeviceBus(DeviceBus):
 
 
 @base.NovaObjectRegistry.register
-class XenDeviceBus(DeviceBus):
-    VERSION = '1.0'
-
-    fields = {
-        'address': fields.XenAddressField(),
-    }
-
-
-@base.NovaObjectRegistry.register
 class DeviceMetadata(base.NovaObject):
     VERSION = '1.0'
 

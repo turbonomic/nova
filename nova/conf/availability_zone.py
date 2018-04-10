@@ -20,42 +20,32 @@ availability_zone_opts = [
     cfg.StrOpt('internal_service_availability_zone',
         default='internal',
         help="""
-Availability zone for internal services.
-
-This option determines the availability zone for the various internal nova
-services, such as 'nova-scheduler', 'nova-conductor', etc.
+This option specifies the name of the availability zone for the
+internal services. Services like nova-scheduler, nova-network,
+nova-conductor are internal services. These services will appear in
+their own internal availability_zone.
 
 Possible values:
 
-* Any string representing an existing availability zone name.
+* Any string representing an availability zone name
+* 'internal' is the default value
+
 """),
     cfg.StrOpt('default_availability_zone',
         default='nova',
         help="""
-Default availability zone for compute services.
+Default compute node availability_zone.
 
-This option determines the default availability zone for 'nova-compute'
-services, which will be used if the service(s) do not belong to aggregates with
-availability zone metadata.
-
-Possible values:
-
-* Any string representing an existing availability zone name.
-"""),
-    cfg.StrOpt('default_schedule_zone',
-        help="""
-Default availability zone for instances.
-
-This option determines the default availability zone for instances, which will
-be used when a user does not specify one when creating an instance. The
-instance(s) will be bound to this availability zone for their lifetime.
+This option determines the availability zone to be used when it is not
+specified in the VM creation request. If this option is not set,
+the default availability zone 'nova' is used.
 
 Possible values:
 
-* Any string representing an existing availability zone name.
-* None, which means that the instance can move from one availability zone to
-  another during its lifetime if it is moved from one compute node to another.
-"""),
+* Any string representing an availability zone name
+* 'nova' is the default value
+
+""")
 ]
 
 

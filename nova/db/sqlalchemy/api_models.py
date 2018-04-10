@@ -168,7 +168,7 @@ class RequestSpec(API_BASE):
 
     id = Column(Integer, primary_key=True)
     instance_uuid = Column(String(36), nullable=False)
-    spec = Column(MediumText(), nullable=False)
+    spec = Column(Text, nullable=False)
 
 
 class Flavors(API_BASE):
@@ -243,7 +243,6 @@ class BuildRequest(API_BASE):
     project_id = Column(String(255), nullable=False)
     instance = Column(MediumText())
     block_device_mappings = Column(MediumText())
-    tags = Column(Text())
     # TODO(alaski): Drop these from the db in Ocata
     # columns_to_drop = ['request_spec_id', 'user_id', 'display_name',
     #         'instance_metadata', 'progress', 'vm_state', 'task_state',
@@ -300,6 +299,7 @@ class ResourceProvider(API_BASE):
     uuid = Column(String(36), nullable=False)
     name = Column(Unicode(200), nullable=True)
     generation = Column(Integer, default=0)
+    can_host = Column(Integer, default=0)
 
 
 class Inventory(API_BASE):
@@ -567,7 +567,7 @@ class Trait(API_BASE):
     name = Column(Unicode(255), nullable=False)
 
 
-class ResourceProviderTrait(API_BASE):
+class ResourceProviderTraits(API_BASE):
     """Represents the relationship between traits and resource provider"""
 
     __tablename__ = "resource_provider_traits"
@@ -582,50 +582,3 @@ class ResourceProviderTrait(API_BASE):
                                   ForeignKey('resource_providers.id'),
                                   primary_key=True,
                                   nullable=False)
-
-
-class Project(API_BASE):
-    """The project is the Keystone project."""
-
-    __tablename__ = 'projects'
-    __table_args__ = (
-        schema.UniqueConstraint(
-            'external_id',
-            name='uniq_projects0external_id',
-        ),
-    )
-
-    id = Column(Integer, primary_key=True, nullable=False, autoincrement=True)
-    external_id = Column(String(255), nullable=False)
-
-
-class User(API_BASE):
-    """The user is the Keystone user."""
-
-    __tablename__ = 'users'
-    __table_args__ = (
-        schema.UniqueConstraint(
-            'external_id',
-            name='uniq_users0external_id',
-        ),
-    )
-
-    id = Column(Integer, primary_key=True, nullable=False, autoincrement=True)
-    external_id = Column(String(255), nullable=False)
-
-
-class Consumer(API_BASE):
-    """Represents a resource consumer."""
-
-    __tablename__ = 'consumers'
-    __table_args__ = (
-        Index('consumers_project_id_uuid_idx', 'project_id', 'uuid'),
-        Index('consumers_project_id_user_id_uuid_idx', 'project_id', 'user_id',
-              'uuid'),
-        schema.UniqueConstraint('uuid', name='uniq_consumers0uuid'),
-    )
-
-    id = Column(Integer, primary_key=True, nullable=False, autoincrement=True)
-    uuid = Column(String(36), nullable=False)
-    project_id = Column(Integer, nullable=False)
-    user_id = Column(Integer, nullable=False)

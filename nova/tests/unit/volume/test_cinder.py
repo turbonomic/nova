@@ -13,12 +13,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from cinderclient import api_versions as cinder_api_versions
 from cinderclient import exceptions as cinder_exception
 from keystoneclient import exceptions as keystone_exception
 import mock
 from oslo_utils import timeutils
-import six
 
 import nova.conf
 from nova import context
@@ -64,41 +62,6 @@ class FakeSnapshot(object):
         self.progress = '99%'
         self.volume_id = volume_id
         self.project_id = 'fake_project'
-
-
-class FakeAttachment(object):
-
-    def __init__(self):
-        self.id = uuids.attachment_id
-        self.status = 'attached'
-        self.instance = uuids.instance_uuid
-        self.volume_id = uuids.volume_id
-        self.attached_at = timeutils.utcnow()
-        self.detached_at = None
-        self.attach_mode = 'rw'
-        self.connection_info = {'driver_volume_type': 'fake_type',
-                                'target_lun': '1',
-                                'foo': 'bar'}
-        self.att = {'id': self.id,
-                    'status': self.status,
-                    'instance': self.instance,
-                    'volume_id': self.volume_id,
-                    'attached_at': self.attached_at,
-                    'detached_at': self.detached_at,
-                    'attach_mode': self.attach_mode,
-                    'connection_info': self.connection_info}
-
-    def get(self, key, default=None):
-        return self.att.get(key, default)
-
-    def __setitem__(self, key, value):
-        self.att[key] = value
-
-    def __getitem__(self, key):
-        return self.att[key]
-
-    def to_dict(self):
-        return self.att
 
 
 class CinderApiTestCase(test.NoDBTestCase):
@@ -226,14 +189,34 @@ class CinderApiTestCase(test.NoDBTestCase):
                   'attach_status': 'detached',
                   'availability_zone': 'zone2'}
         instance = fake_instance_obj(self.ctx)
-        # Simulate _provision_instances in the compute API; the instance is not
-        # created in the API so the instance will not have an id attribute set.
-        delattr(instance, 'id')
 
         self.assertRaises(exception.InvalidVolume,
                           self.api.check_availability_zone,
                           self.ctx, volume, instance)
         mock_get_instance_az.assert_called_once_with(self.ctx, instance)
+
+    def test_check_detach(self):
+        volume = {'id': 'fake', 'status': 'in-use',
+                  'attach_status': 'attached',
+                  'attachments': {uuids.instance: {
+                                    'attachment_id': uuids.attachment}}
+                  }
+        self.assertIsNone(self.api.check_detach(self.ctx, volume))
+        instance = fake_instance_obj(self.ctx)
+        instance.uuid = uuids.instance
+        self.assertIsNone(self.api.check_detach(self.ctx, volume, instance))
+        instance.uuid = uuids.instance2
+        self.assertRaises(exception.VolumeUnattached,
+                          self.api.check_detach, self.ctx, volume, instance)
+        volume['attachments'] = {}
+        self.assertRaises(exception.VolumeUnattached,
+                          self.api.check_detach, self.ctx, volume, instance)
+        volume['status'] = 'available'
+        self.assertRaises(exception.InvalidVolume,
+                          self.api.check_detach, self.ctx, volume)
+        volume['attach_status'] = 'detached'
+        self.assertRaises(exception.InvalidVolume,
+                          self.api.check_detach, self.ctx, volume)
 
     @mock.patch('nova.volume.cinder.cinderclient')
     def test_reserve_volume(self, mock_cinderclient):
@@ -296,142 +279,6 @@ class CinderApiTestCase(test.NoDBTestCase):
         mock_cinderclient.assert_called_once_with(self.ctx)
         mock_volumes.attach.assert_called_once_with('id1', 'uuid', 'point',
                                                     mode='ro')
-
-    @mock.patch('nova.volume.cinder.cinderclient')
-    def test_attachment_create(self, mock_cinderclient):
-        """Tests the happy path for creating a volume attachment."""
-        attachment_ref = {'id': uuids.attachment_id,
-                          'connection_info': {}}
-        expected_attachment_ref = {'id': uuids.attachment_id,
-                                   'connection_info': {'data': {}}}
-        mock_cinderclient.return_value.attachments.create.return_value = (
-            attachment_ref)
-        result = self.api.attachment_create(
-            self.ctx, uuids.volume_id, uuids.instance_id)
-        self.assertEqual(expected_attachment_ref, result)
-        mock_cinderclient.return_value.attachments.create.\
-            assert_called_once_with(uuids.volume_id, None, uuids.instance_id)
-
-    @mock.patch('nova.volume.cinder.cinderclient')
-    def test_attachment_create_volume_not_found(self, mock_cinderclient):
-        """Tests that the translate_volume_exception decorator is used."""
-        # fake out the volume not found error
-        mock_cinderclient.return_value.attachments.create.side_effect = (
-            cinder_exception.NotFound(404))
-        self.assertRaises(exception.VolumeNotFound, self.api.attachment_create,
-                          self.ctx, uuids.volume_id, uuids.instance_id)
-
-    @mock.patch('nova.volume.cinder.cinderclient',
-                side_effect=exception.CinderAPIVersionNotAvailable(
-                    version='3.27'))
-    def test_attachment_create_unsupported_api_version(self,
-                                                       mock_cinderclient):
-        """Tests that CinderAPIVersionNotAvailable is passed back through
-        if 3.27 isn't available.
-        """
-        self.assertRaises(exception.CinderAPIVersionNotAvailable,
-                          self.api.attachment_create,
-                          self.ctx, uuids.volume_id, uuids.instance_id)
-        mock_cinderclient.assert_called_once_with(self.ctx, '3.27')
-
-    @mock.patch('nova.volume.cinder.cinderclient')
-    def test_attachment_update(self, mock_cinderclient):
-        """Tests the happy path for updating a volume attachment."""
-        fake_attachment = FakeAttachment()
-        expected_attachment_ref = {
-            'id': uuids.attachment_id,
-            'status': 'attached',
-            'instance': fake_attachment.instance,
-            'volume_id': fake_attachment.volume_id,
-            'attached_at': fake_attachment.attached_at,
-            'detached_at': None,
-            'attach_mode': 'rw',
-            'connection_info': {'driver_volume_type': 'fake_type',
-                                'data': {'foo': 'bar',
-                                         'target_lun': '1'}}}
-        mock_cinderclient.return_value.attachments.update.return_value = (
-            fake_attachment)
-        result = self.api.attachment_update(
-            self.ctx, uuids.attachment_id, connector={'host': 'fake-host'})
-        self.assertEqual(expected_attachment_ref, result)
-
-    @mock.patch('nova.volume.cinder.cinderclient')
-    def test_attachment_update_attachment_not_found(self, mock_cinderclient):
-        """Tests that the translate_attachment_exception decorator is used."""
-        # fake out the volume not found error
-        mock_cinderclient.return_value.attachments.update.side_effect = (
-            cinder_exception.NotFound(404))
-        self.assertRaises(exception.VolumeAttachmentNotFound,
-                          self.api.attachment_update,
-                          self.ctx, uuids.attachment_id,
-                          connector={'host': 'fake-host'})
-
-    @mock.patch('nova.volume.cinder.cinderclient')
-    def test_attachment_update_attachment_no_connector(self,
-                                                       mock_cinderclient):
-        """Tests that the translate_cinder_exception decorator is used."""
-        # fake out the volume bad request error
-        mock_cinderclient.return_value.attachments.update.side_effect = (
-            cinder_exception.BadRequest(400))
-        self.assertRaises(exception.InvalidInput,
-                          self.api.attachment_update,
-                          self.ctx, uuids.attachment_id, connector=None)
-
-    @mock.patch('nova.volume.cinder.cinderclient',
-                side_effect=exception.CinderAPIVersionNotAvailable(
-                    version='3.27'))
-    def test_attachment_update_unsupported_api_version(self,
-                                                       mock_cinderclient):
-        """Tests that CinderAPIVersionNotAvailable is passed back through
-        if 3.27 isn't available.
-        """
-        self.assertRaises(exception.CinderAPIVersionNotAvailable,
-                          self.api.attachment_update,
-                          self.ctx, uuids.attachment_id, connector={})
-        mock_cinderclient.assert_called_once_with(self.ctx, '3.27',
-                                                  skip_version_check=True)
-
-    @mock.patch('nova.volume.cinder.cinderclient')
-    def test_attachment_delete(self, mock_cinderclient):
-        mock_attachments = mock.MagicMock()
-        mock_cinderclient.return_value = \
-            mock.MagicMock(attachments=mock_attachments)
-
-        attachment_id = uuids.attachment
-        self.api.attachment_delete(self.ctx, attachment_id)
-
-        mock_cinderclient.assert_called_once_with(self.ctx, '3.27',
-                                                  skip_version_check=True)
-        mock_attachments.delete.assert_called_once_with(attachment_id)
-
-    @mock.patch('nova.volume.cinder.LOG')
-    @mock.patch('nova.volume.cinder.cinderclient')
-    def test_attachment_delete_failed(self, mock_cinderclient, mock_log):
-        mock_cinderclient.return_value.attachments.delete.side_effect = (
-                cinder_exception.NotFound(404, '404'))
-
-        attachment_id = uuids.attachment
-        ex = self.assertRaises(exception.VolumeAttachmentNotFound,
-                               self.api.attachment_delete,
-                               self.ctx,
-                               attachment_id)
-
-        self.assertEqual(404, ex.code)
-        self.assertIn(attachment_id, six.text_type(ex))
-
-    @mock.patch('nova.volume.cinder.cinderclient',
-                side_effect=exception.CinderAPIVersionNotAvailable(
-                    version='3.27'))
-    def test_attachment_delete_unsupported_api_version(self,
-                                                       mock_cinderclient):
-        """Tests that CinderAPIVersionNotAvailable is passed back through
-        if 3.27 isn't available.
-        """
-        self.assertRaises(exception.CinderAPIVersionNotAvailable,
-                          self.api.attachment_delete,
-                          self.ctx, uuids.attachment_id)
-        mock_cinderclient.assert_called_once_with(self.ctx, '3.27',
-                                                  skip_version_check=True)
 
     @mock.patch('nova.volume.cinder.cinderclient')
     def test_detach(self, mock_cinderclient):
@@ -765,95 +612,3 @@ class CinderApiTestCase(test.NoDBTestCase):
         my_func.side_effect = raised_exc
 
         self.assertRaises(expected_exc, wrapper(my_func), 'foo', 'bar', 'baz')
-
-
-class CinderClientTestCase(test.NoDBTestCase):
-    """Used to test constructing a cinder client object at various versions."""
-
-    def setUp(self):
-        super(CinderClientTestCase, self).setUp()
-        cinder.reset_globals()
-        self.ctxt = context.RequestContext('fake-user', 'fake-project')
-        # Mock out the keystoneauth stuff.
-        self.mock_session = mock.Mock(
-            autospec='keystoneauth1.loading.session.Session')
-        load_session = mock.patch('keystoneauth1.loading.'
-                                  'load_session_from_conf_options',
-                                  return_value=self.mock_session).start()
-        self.addCleanup(load_session.stop)
-
-    @mock.patch('cinderclient.client.get_volume_api_from_url',
-                return_value='3')
-    def test_create_v3_client_no_microversion(self, get_volume_api):
-        """Tests that creating a v3 client, which is the default, and without
-        specifying a microversion will default to 3.0 as the version to use.
-        """
-        client = cinder.cinderclient(self.ctxt)
-        self.assertEqual(cinder_api_versions.APIVersion('3.0'),
-                         client.api_version)
-        get_volume_api.assert_called_once_with(
-            self.mock_session.get_endpoint.return_value)
-
-    @mock.patch('cinderclient.client.get_volume_api_from_url',
-                return_value='2')
-    def test_create_v2_client_with_microversion_fails(self, get_volume_api):
-        """Tests that requesting a microversion against a v2 client will raise
-        an exception.
-        """
-        self.assertRaises(exception.CinderAPIVersionNotAvailable,
-                          cinder.cinderclient, self.ctxt, microversion='3.27')
-        get_volume_api.assert_called_once_with(
-            self.mock_session.get_endpoint.return_value)
-
-    @mock.patch('cinderclient.client.get_volume_api_from_url',
-                return_value='3')
-    @mock.patch('cinderclient.client.get_highest_client_server_version',
-                return_value=2.0)   # Fake the case that cinder is really old.
-    def test_create_v3_client_with_microversion_too_new(self,
-                                                        get_highest_version,
-                                                        get_volume_api):
-        """Tests that creating a v3 client and requesting a microversion that
-        is either too new for the server (or client) to support raises an
-        exception.
-        """
-        self.assertRaises(exception.CinderAPIVersionNotAvailable,
-                          cinder.cinderclient, self.ctxt, microversion='3.27')
-        get_volume_api.assert_called_once_with(
-            self.mock_session.get_endpoint.return_value)
-        get_highest_version.assert_called_once_with(
-            self.mock_session.get_endpoint.return_value)
-
-    @mock.patch('cinderclient.client.get_highest_client_server_version',
-                return_value=cinder_api_versions.MAX_VERSION)
-    @mock.patch('cinderclient.client.get_volume_api_from_url',
-                return_value='3')
-    def test_create_v3_client_with_microversion_available(self,
-                                                          get_volume_api,
-                                                          get_highest_version):
-        """Tests that creating a v3 client and requesting a microversion that
-        is available in the server and supported by the client will result in
-        creating a Client object with the requested microversion.
-        """
-        client = cinder.cinderclient(self.ctxt, microversion='3.27')
-        self.assertEqual(cinder_api_versions.APIVersion('3.27'),
-                         client.api_version)
-        get_volume_api.assert_called_once_with(
-            self.mock_session.get_endpoint.return_value)
-        get_highest_version.assert_called_once_with(
-            self.mock_session.get_endpoint.return_value)
-
-    @mock.patch('cinderclient.client.get_highest_client_server_version',
-                new_callable=mock.NonCallableMock)  # asserts not called
-    @mock.patch('cinderclient.client.get_volume_api_from_url',
-                return_value='3')
-    def test_create_v3_client_with_microversion_skip_version_check(
-            self, get_volume_api, get_highest_version):
-        """Tests that creating a v3 client and requesting a microversion
-        but asking to skip the version discovery check is honored.
-        """
-        client = cinder.cinderclient(self.ctxt, microversion='3.27',
-                                     skip_version_check=True)
-        self.assertEqual(cinder_api_versions.APIVersion('3.27'),
-                         client.api_version)
-        get_volume_api.assert_called_once_with(
-            self.mock_session.get_endpoint.return_value)

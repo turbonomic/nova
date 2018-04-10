@@ -22,26 +22,15 @@ POLICY_ROOT = 'os_compute_api:os-quota-class-sets:%s'
 
 
 quota_class_sets_policies = [
-    policy.DocumentedRuleDefault(
-        POLICY_ROOT % 'show',
-        'is_admin:True or quota_class:%(quota_class)s',
-        "List quotas for specific quota classs",
-        [
-            {
-                'method': 'GET',
-                'path': '/os-quota-class-sets/{quota_class}'
-            }
-        ]),
-    policy.DocumentedRuleDefault(
-        POLICY_ROOT % 'update',
-        base.RULE_ADMIN_API,
-        'Update quotas for specific quota class',
-        [
-            {
-                'method': 'PUT',
-                'path': '/os-quota-class-sets/{quota_class}'
-            }
-        ]),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'show',
+        check_str='is_admin:True or quota_class:%(quota_class)s'),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'update',
+        check_str=base.RULE_ADMIN_API),
 ]
 
 

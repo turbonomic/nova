@@ -150,24 +150,6 @@ valid_name_leading_trailing_spaces_regex_base = (
     "^[%(ws)s]*[%(no_ws)s][%(no_ws)s%(ws)s]+[%(no_ws)s][%(ws)s]*$")
 
 
-valid_az_name_regex = ValidationRegex(
-    valid_name_regex_base % (
-        _build_regex_range(ws=False, invert=True),
-        _build_regex_range(exclude=[':']),
-        _build_regex_range(ws=False, invert=True)),
-    _("printable characters except :."
-      "Can not start or end with whitespace."))
-
-
-# az's name disallow ':'.
-valid_az_name_leading_trailing_spaces_regex = ValidationRegex(
-    valid_name_leading_trailing_spaces_regex_base % {
-        'ws': _build_regex_range(exclude=[':']),
-        'no_ws': _build_regex_range(ws=False, exclude=[':'])},
-    _("printable characters except :, "
-      "with at least one non space character"))
-
-
 valid_cell_name_regex = ValidationRegex(
     valid_name_regex_base % (
         _build_regex_range(ws=False, invert=True),
@@ -219,21 +201,15 @@ none = {
 
 positive_integer = {
     'type': ['integer', 'string'],
-    'pattern': '^[0-9]*$', 'minimum': 1, 'minLength': 1
+    'pattern': '^[0-9]*$', 'minimum': 1
 }
 
 
 non_negative_integer = {
     'type': ['integer', 'string'],
-    'pattern': '^[0-9]*$', 'minimum': 0, 'minLength': 1
+    'pattern': '^[0-9]*$', 'minimum': 0
 }
 
-# This only be used by nova-network specific APIs. It will be removed when
-# those API removed.
-positive_integer_with_empty_str = {
-    'type': ['integer', 'string'],
-    'pattern': '^[0-9]*$', 'minimum': 1,
-}
 
 hostname = {
     'type': 'string', 'minLength': 1, 'maxLength': 255,
@@ -260,18 +236,6 @@ name = {
     # This definition is used for all their parameters.
     'type': 'string', 'minLength': 1, 'maxLength': 255,
     'format': 'name'
-}
-
-
-az_name = {
-    'type': 'string', 'minLength': 1, 'maxLength': 255,
-    'format': 'az_name'
-}
-
-
-az_name_with_leading_trailing_spaces = {
-    'type': 'string', 'minLength': 1, 'maxLength': 255,
-    'format': 'az_name_with_leading_trailing_spaces'
 }
 
 

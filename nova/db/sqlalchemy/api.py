@@ -65,7 +65,8 @@ import nova.conf
 import nova.context
 from nova.db.sqlalchemy import models
 from nova import exception
-from nova.i18n import _
+from nova.i18n import _, _LI, _LE, _LW
+from nova import quota
 from nova import safe_utils
 
 profiler_sqlalchemy = importutils.try_import('osprofiler.sqlalchemy')
@@ -474,17 +475,6 @@ def service_get(context, service_id):
     return result
 
 
-@pick_context_manager_reader
-def service_get_by_uuid(context, service_uuid):
-    query = model_query(context, models.Service).filter_by(uuid=service_uuid)
-
-    result = query.first()
-    if not result:
-        raise exception.ServiceNotFound(service_id=service_uuid)
-
-    return result
-
-
 @pick_context_manager_reader_allow_async
 def service_get_minimum_version(context, binaries):
     min_versions = context.session.query(
@@ -584,13 +574,8 @@ def service_get_by_compute_host(context, host):
 def service_create(context, values):
     service_ref = models.Service()
     service_ref.update(values)
-    # We only auto-disable nova-compute services since those are the only
-    # ones that can be enabled using the os-services REST API and they are
-    # the only ones where being disabled means anything. It does
-    # not make sense to be able to disable non-compute services like
-    # nova-scheduler or nova-osapi_compute since that does nothing.
-    if not CONF.enable_new_services and values.get('binary') == 'nova-compute':
-        msg = _("New compute service disabled due to config option.")
+    if not CONF.enable_new_services:
+        msg = _("New service disabled due to config option.")
         service_ref.disabled = True
         service_ref.disabled_reason = msg
     try:
@@ -640,8 +625,6 @@ def _compute_node_select(context, filters=None, limit=None, marker=None):
     if "hypervisor_hostname" in filters:
         hyp_hostname = filters["hypervisor_hostname"]
         select = select.where(cn_tbl.c.hypervisor_hostname == hyp_hostname)
-    if "mapped" in filters:
-        select = select.where(cn_tbl.c.mapped < filters['mapped'])
     if marker is not None:
         try:
             compute_node_get(context, marker)
@@ -720,12 +703,6 @@ def compute_node_get_all(context):
 
 
 @pick_context_manager_reader
-def compute_node_get_all_mapped_less_than(context, mapped_less_than):
-    return _compute_node_fetchall(context,
-                                  {'mapped': mapped_less_than})
-
-
-@pick_context_manager_reader
 def compute_node_get_all_by_pagination(context, limit=None, marker=None):
     return _compute_node_fetchall(context, limit=limit, marker=marker)
 
@@ -797,8 +774,7 @@ def compute_node_statistics(context):
                 inner_sel.c.service_id == services_tbl.c.id
             ),
             services_tbl.c.disabled == false(),
-            services_tbl.c.binary == 'nova-compute',
-            services_tbl.c.deleted == 0
+            services_tbl.c.binary == 'nova-compute'
         )
     )
 
@@ -905,7 +881,7 @@ def floating_ip_get(context, id):
         if not result:
             raise exception.FloatingIpNotFound(id=id)
     except db_exc.DBError:
-        LOG.warning("Invalid floating IP ID %s in request", id)
+        LOG.warning(_LW("Invalid floating IP ID %s in request"), id)
         raise exception.InvalidID(id=id)
     return result
 
@@ -1004,6 +980,20 @@ def floating_ip_bulk_destroy(context, ips):
         model_query(context, models.FloatingIp).\
             filter(models.FloatingIp.address.in_(ip_block)).\
             soft_delete(synchronize_session='fetch')
+
+    # Delete the quotas, if needed.
+    # Quota update happens in a separate transaction, so previous must have
+    # been committed first.
+    for project_id, count in project_id_to_quota_count.items():
+        try:
+            reservations = quota.QUOTAS.reserve(context,
+                                                project_id=project_id,
+                                                floating_ips=count)
+            quota.QUOTAS.commit(context, reservations, project_id=project_id)
+        except Exception:
+            with excutils.save_and_reraise_exception():
+                LOG.exception(_LE("Failed to update usages bulk "
+                                  "deallocating floating IP"))
 
 
 @require_context
@@ -1589,7 +1579,7 @@ def virtual_interface_create(context, values):
         vif_ref.update(values)
         vif_ref.save(context.session)
     except db_exc.DBError:
-        LOG.exception("VIF creation failed with a database error.")
+        LOG.exception(_LE("VIF creation failed with a database error."))
         raise exception.VirtualInterfaceCreateException()
 
     return vif_ref
@@ -1936,7 +1926,7 @@ def instance_get(context, instance_id, columns_to_join=None):
     except db_exc.DBError:
         # NOTE(sdague): catch all in case the db engine chokes on the
         # id because it's too long of an int to store.
-        LOG.warning("Invalid instance id %s in request", instance_id)
+        LOG.warning(_LW("Invalid instance id %s in request"), instance_id)
         raise exception.InvalidID(id=instance_id)
 
 
@@ -2157,7 +2147,7 @@ def instance_get_all_by_filters_sort(context, filters, limit=None, marker=None,
 
     # Make a copy of the filters dictionary to use going forward, as we'll
     # be modifying it and we shouldn't affect the caller's use of it.
-    filters = copy.deepcopy(filters)
+    filters = filters.copy()
 
     if 'changes-since' in filters:
         changes_since = timeutils.normalize_time(filters['changes-since'])
@@ -2536,10 +2526,9 @@ def _instance_get_all_query(context, project_only=False, joins=None):
 
 @pick_context_manager_reader_allow_async
 def instance_get_all_by_host(context, host, columns_to_join=None):
-    query = _instance_get_all_query(context, joins=columns_to_join)
     return _instances_fill_metadata(context,
-                                    query.filter_by(host=host).all(),
-                                    manual_joins=columns_to_join)
+      _instance_get_all_query(context).filter_by(host=host).all(),
+                              manual_joins=columns_to_join)
 
 
 def _instance_get_all_uuids_by_host(context, host):
@@ -3689,17 +3678,17 @@ def _refresh_quota_usages(quota_usage, until_refresh, in_use):
     :param in_use:        Actual quota usage for the resource.
     """
     if quota_usage.in_use != in_use:
-        LOG.info('quota_usages out of sync, updating. '
-                 'project_id: %(project_id)s, '
-                 'user_id: %(user_id)s, '
-                 'resource: %(res)s, '
-                 'tracked usage: %(tracked_use)s, '
-                 'actual usage: %(in_use)s',
-                 {'project_id': quota_usage.project_id,
-                  'user_id': quota_usage.user_id,
-                  'res': quota_usage.resource,
-                  'tracked_use': quota_usage.in_use,
-                  'in_use': in_use})
+        LOG.info(_LI('quota_usages out of sync, updating. '
+                     'project_id: %(project_id)s, '
+                     'user_id: %(user_id)s, '
+                     'resource: %(res)s, '
+                     'tracked usage: %(tracked_use)s, '
+                     'actual usage: %(in_use)s'),
+            {'project_id': quota_usage.project_id,
+             'user_id': quota_usage.user_id,
+             'res': quota_usage.resource,
+             'tracked_use': quota_usage.in_use,
+             'in_use': in_use})
     else:
         LOG.debug('QuotaUsage has not changed, refresh is unnecessary for: %s',
                   dict(quota_usage))
@@ -3896,8 +3885,8 @@ def quota_reserve(context, resources, project_quotas, user_quotas, deltas,
         context.session.add(usage_ref)
 
     if unders:
-        LOG.warning("Change will make usage less than 0 for the following "
-                    "resources: %s", unders)
+        LOG.warning(_LW("Change will make usage less than 0 for the following "
+                        "resources: %s"), unders)
 
     if overs:
         if project_quotas == user_quotas:
@@ -4018,7 +4007,7 @@ def reservation_expire(context):
             reservation.usage.reserved -= reservation.delta
             context.session.add(reservation.usage)
 
-    return reservation_query.soft_delete(synchronize_session=False)
+    reservation_query.soft_delete(synchronize_session=False)
 
 
 ###################
@@ -4925,7 +4914,7 @@ def console_get(context, console_id, instance_uuid=None):
     if not result:
         if instance_uuid:
             raise exception.ConsoleNotFoundForInstance(
-                    instance_uuid=instance_uuid)
+                    console_id=console_id, instance_uuid=instance_uuid)
         else:
             raise exception.ConsoleNotFound(console_id=console_id)
 
@@ -5598,9 +5587,9 @@ def vol_usage_update(context, id, rd_req, rd_bytes, wr_req, wr_bytes,
             rd_bytes < current_usage['curr_read_bytes'] or
             wr_req < current_usage['curr_writes'] or
                 wr_bytes < current_usage['curr_write_bytes']):
-            LOG.info("Volume(%s) has lower stats then what is in "
-                     "the database. Instance must have been rebooted "
-                     "or crashed. Updating totals.", id)
+            LOG.info(_LI("Volume(%s) has lower stats then what is in "
+                         "the database. Instance must have been rebooted "
+                         "or crashed. Updating totals."), id)
             if not update_totals:
                 values['tot_reads'] = (models.VolumeUsage.tot_reads +
                                        current_usage['curr_reads'])
@@ -5959,8 +5948,8 @@ def aggregate_metadata_add(context, aggregate_id, metadata, set_delete=False,
                 if attempt < max_retries - 1:
                     ctxt.reraise = False
                 else:
-                    LOG.warning("Add metadata failed for aggregate %(id)s "
-                                "after %(retries)s retries",
+                    LOG.warning(_LW("Add metadata failed for aggregate %(id)s "
+                                    "after %(retries)s retries"),
                                 {"id": aggregate_id, "retries": max_retries})
 
 
@@ -6380,7 +6369,7 @@ def _archive_if_instance_deleted(table, shadow_table, instances, conn,
             result_delete = conn.execute(delete_statement)
             return result_delete.rowcount
     except db_exc.DBReferenceError as ex:
-        LOG.warning('Failed to archive %(table)s: %(error)s',
+        LOG.warning(_LW('Failed to archive %(table)s: %(error)s'),
                     {'table': table.__tablename__,
                      'error': six.text_type(ex)})
         return 0
@@ -6472,8 +6461,8 @@ def _archive_deleted_rows_for_table(tablename, max_rows):
         # A foreign key constraint keeps us from deleting some of
         # these rows until we clean up a dependent table.  Just
         # skip this table for now; we'll come back to it later.
-        LOG.warning("IntegrityError detected when archiving table "
-                    "%(tablename)s: %(error)s",
+        LOG.warning(_LW("IntegrityError detected when archiving table "
+                        "%(tablename)s: %(error)s"),
                     {'tablename': tablename, 'error': six.text_type(ex)})
 
     if ((max_rows is None or rows_archived < max_rows)
@@ -6527,19 +6516,20 @@ def archive_deleted_rows(max_rows=None):
 
 
 @pick_context_manager_writer
-def service_uuids_online_data_migration(context, max_count):
-    from nova.objects import service
+def aggregate_uuids_online_data_migration(context, max_count):
+    from nova.objects import aggregate
 
     count_all = 0
     count_hit = 0
 
-    db_services = model_query(context, models.Service).filter_by(
+    results = model_query(context, models.Aggregate).filter_by(
         uuid=None).limit(max_count)
-    for db_service in db_services:
+    for db_agg in results:
         count_all += 1
-        service_obj = service.Service._from_db_object(
-            context, service.Service(), db_service)
-        if 'uuid' in service_obj:
+        agg = aggregate.Aggregate._from_db_object(context,
+                                                  aggregate.Aggregate(),
+                                                  db_agg)
+        if 'uuid' in agg:
             count_hit += 1
     return count_all, count_hit
 

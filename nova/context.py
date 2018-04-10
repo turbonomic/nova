@@ -20,8 +20,6 @@
 from contextlib import contextmanager
 import copy
 
-import eventlet.queue
-import eventlet.timeout
 from keystoneauth1.access import service_catalog as ksa_service_catalog
 from keystoneauth1 import plugin
 from oslo_context import context
@@ -32,25 +30,10 @@ import six
 
 from nova import exception
 from nova.i18n import _
-from nova import objects
 from nova import policy
 from nova import utils
 
 LOG = logging.getLogger(__name__)
-# TODO(melwitt): This cache should be cleared whenever WSGIService receives a
-# SIGHUP and periodically based on an expiration time. Currently, none of the
-# cell caches are purged, so neither is this one, for now.
-CELL_CACHE = {}
-# NOTE(melwitt): Used for the scatter-gather utility to indicate we timed out
-# waiting for a result from a cell.
-did_not_respond_sentinel = object()
-# NOTE(melwitt): Used for the scatter-gather utility to indicate an exception
-# was raised gathering a result from a cell.
-raised_exception_sentinel = object()
-# FIXME(danms): Keep a global cache of the cells we find the
-# first time we look. This needs to be refreshed on a timer or
-# trigger.
-CELLS = []
 
 
 class _ContextAuthPlugin(plugin.BaseAuthPlugin):
@@ -217,17 +200,21 @@ class RequestContext(context.RequestContext):
 
     @classmethod
     def from_dict(cls, values):
-        return super(RequestContext, cls).from_dict(
-            values,
+        return cls(
             user_id=values.get('user_id'),
+            user=values.get('user'),
             project_id=values.get('project_id'),
-            # TODO(sdague): oslo.context has show_deleted, if
-            # possible, we should migrate to that in the future so we
-            # don't need to be different here.
+            tenant=values.get('tenant'),
+            is_admin=values.get('is_admin'),
             read_deleted=values.get('read_deleted', 'no'),
+            roles=values.get('roles'),
             remote_address=values.get('remote_address'),
             timestamp=values.get('timestamp'),
+            request_id=values.get('request_id'),
+            auth_token=values.get('auth_token'),
             quota_class=values.get('quota_class'),
+            user_name=values.get('user_name'),
+            project_name=values.get('project_name'),
             service_catalog=values.get('service_catalog'),
             instance_lock_checked=values.get('instance_lock_checked', False),
         )
@@ -383,31 +370,15 @@ def set_target_cell(context, cell_mapping):
     :param context: The RequestContext to add connection information
     :param cell_mapping: An objects.CellMapping object or None
     """
-    global CELL_CACHE
     if cell_mapping is not None:
         # avoid circular import
         from nova import db
         from nova import rpc
-
-        # Synchronize access to the cache by multiple API workers.
-        @utils.synchronized(cell_mapping.uuid)
-        def get_or_set_cached_cell_and_set_connections():
-            try:
-                cell_tuple = CELL_CACHE[cell_mapping.uuid]
-            except KeyError:
-                db_connection_string = cell_mapping.database_connection
-                context.db_connection = db.create_context_manager(
-                    db_connection_string)
-                if not cell_mapping.transport_url.startswith('none'):
-                    context.mq_connection = rpc.create_transport(
-                        cell_mapping.transport_url)
-                CELL_CACHE[cell_mapping.uuid] = (context.db_connection,
-                                                 context.mq_connection)
-            else:
-                context.db_connection = cell_tuple[0]
-                context.mq_connection = cell_tuple[1]
-
-        get_or_set_cached_cell_and_set_connections()
+        db_connection_string = cell_mapping.database_connection
+        context.db_connection = db.create_context_manager(db_connection_string)
+        if not cell_mapping.transport_url.startswith('none'):
+            context.mq_connection = rpc.create_transport(
+                cell_mapping.transport_url)
     else:
         context.db_connection = None
         context.mq_connection = None
@@ -415,143 +386,22 @@ def set_target_cell(context, cell_mapping):
 
 @contextmanager
 def target_cell(context, cell_mapping):
-    """Yields a new context with connection information for a specific cell.
+    """Temporarily adds database connection information to the context
+    for communicating with the given target cell.
 
-    This function yields a copy of the provided context, which is targeted to
-    the referenced cell for MQ and DB connections.
+    This context manager makes a temporary change to the context
+    and restores it when complete.
 
-    Passing None for cell_mapping will yield an untargetd copy of the context.
+    Passing None for cell_mapping will untarget the context temporarily.
 
     :param context: The RequestContext to add connection information
     :param cell_mapping: An objects.CellMapping object or None
     """
-    # Create a sanitized copy of context by serializing and deserializing it
-    # (like we would do over RPC). This help ensure that we have a clean
-    # copy of the context with all the tracked attributes, but without any
-    # of the hidden/private things we cache on a context. We do this to avoid
-    # unintentional sharing of cached thread-local data across threads.
-    # Specifically, this won't include any oslo_db-set transaction context, or
-    # any existing cell targeting.
-    cctxt = RequestContext.from_dict(context.to_dict())
-    set_target_cell(cctxt, cell_mapping)
-    yield cctxt
-
-
-def scatter_gather_cells(context, cell_mappings, timeout, fn, *args, **kwargs):
-    """Target cells in parallel and return their results.
-
-    The first parameter in the signature of the function to call for each cell
-    should be of type RequestContext.
-
-    :param context: The RequestContext for querying cells
-    :param cell_mappings: The CellMappings to target in parallel
-    :param timeout: The total time in seconds to wait for all the results to be
-                    gathered
-    :param fn: The function to call for each cell
-    :param args: The args for the function to call for each cell, not including
-                 the RequestContext
-    :param kwargs: The kwargs for the function to call for each cell
-    :returns: A dict {cell_uuid: result} containing the joined results. The
-              did_not_respond_sentinel will be returned if a cell did not
-              respond within the timeout. The raised_exception_sentinel will
-              be returned if the call to a cell raised an exception. The
-              exception will be logged.
-    """
-    greenthreads = []
-    queue = eventlet.queue.LightQueue()
-    results = {}
-
-    def gather_result(cell_uuid, fn, *args, **kwargs):
-        try:
-            result = fn(*args, **kwargs)
-        except Exception:
-            LOG.exception('Error gathering result from cell %s', cell_uuid)
-            result = raised_exception_sentinel
-        # The queue is already synchronized.
-        queue.put((cell_uuid, result))
-
-    for cell_mapping in cell_mappings:
-        with target_cell(context, cell_mapping) as cctxt:
-            greenthreads.append((cell_mapping.uuid,
-                                 utils.spawn(gather_result, cell_mapping.uuid,
-                                             fn, cctxt, *args, **kwargs)))
-
-    with eventlet.timeout.Timeout(timeout, exception.CellTimeout):
-        try:
-            while len(results) != len(greenthreads):
-                cell_uuid, result = queue.get()
-                results[cell_uuid] = result
-        except exception.CellTimeout:
-            # NOTE(melwitt): We'll fill in did_not_respond_sentinels at the
-            # same time we kill/wait for the green threads.
-            pass
-
-    # Kill the green threads still pending and wait on those we know are done.
-    for cell_uuid, greenthread in greenthreads:
-        if cell_uuid not in results:
-            greenthread.kill()
-            results[cell_uuid] = did_not_respond_sentinel
-            LOG.warning('Timed out waiting for response from cell %s',
-                        cell_uuid)
-        else:
-            greenthread.wait()
-
-    return results
-
-
-def load_cells():
-    global CELLS
-    if not CELLS:
-        CELLS = objects.CellMappingList.get_all(get_admin_context())
-        LOG.debug('Found %(count)i cells: %(cells)s',
-                  dict(count=len(CELLS),
-                       cells=','.join([c.identity for c in CELLS])))
-
-    if not CELLS:
-        LOG.error('No cells are configured, unable to continue')
-
-
-def scatter_gather_skip_cell0(context, fn, *args, **kwargs):
-    """Target all cells except cell0 in parallel and return their results.
-
-    The first parameter in the signature of the function to call for each cell
-    should be of type RequestContext. There is a 60 second timeout for waiting
-    on all results to be gathered.
-
-    :param context: The RequestContext for querying cells
-    :param fn: The function to call for each cell
-    :param args: The args for the function to call for each cell, not including
-                 the RequestContext
-    :param kwargs: The kwargs for the function to call for each cell
-    :returns: A dict {cell_uuid: result} containing the joined results. The
-              did_not_respond_sentinel will be returned if a cell did not
-              respond within the timeout. The raised_exception_sentinel will
-              be returned if the call to a cell raised an exception. The
-              exception will be logged.
-    """
-    load_cells()
-    cell_mappings = [cell for cell in CELLS if not cell.is_cell0()]
-    return scatter_gather_cells(context, cell_mappings, 60, fn, *args,
-                                **kwargs)
-
-
-def scatter_gather_all_cells(context, fn, *args, **kwargs):
-    """Target all cells in parallel and return their results.
-
-    The first parameter in the signature of the function to call for each cell
-    should be of type RequestContext. There is a 60 second timeout for waiting
-    on all results to be gathered.
-
-    :param context: The RequestContext for querying cells
-    :param fn: The function to call for each cell
-    :param args: The args for the function to call for each cell, not including
-                 the RequestContext
-    :param kwargs: The kwargs for the function to call for each cell
-    :returns: A dict {cell_uuid: result} containing the joined results. The
-              did_not_respond_sentinel will be returned if a cell did not
-              respond within the timeout. The raised_exception_sentinel will
-              be returned if the call to a cell raised an exception. The
-              exception will be logged.
-    """
-    load_cells()
-    return scatter_gather_cells(context, CELLS, 60, fn, *args, **kwargs)
+    original_db_connection = context.db_connection
+    original_mq_connection = context.mq_connection
+    set_target_cell(context, cell_mapping)
+    try:
+        yield context
+    finally:
+        context.db_connection = original_db_connection
+        context.mq_connection = original_mq_connection

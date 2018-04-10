@@ -30,7 +30,6 @@ from nova import test
 from nova.tests.unit import fake_block_device
 from nova.tests.unit import fake_flavor
 from nova.tests.unit import fake_instance
-from nova.tests import uuidsentinel as uuids
 
 CONF = nova.conf.CONF
 
@@ -112,8 +111,7 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
 
         rpcapi = kwargs.pop('rpcapi_class', compute_rpcapi.ComputeAPI)()
         self.assertIsNotNone(rpcapi.router)
-        self.assertEqual(rpcapi.router.target.topic,
-                         compute_rpcapi.RPC_TOPIC)
+        self.assertEqual(rpcapi.router.target.topic, CONF.compute_topic)
 
         # This test wants to run the real prepare function, so must use
         # a real client object
@@ -185,59 +183,7 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
     def test_attach_interface(self):
         self._test_compute_api('attach_interface', 'call',
                 instance=self.fake_instance_obj, network_id='id',
-                port_id='id2', version='4.16', requested_ip='192.168.1.50',
-                tag='foo')
-
-    def test_attach_interface_raises(self):
-        ctxt = context.RequestContext('fake_user', 'fake_project')
-        instance = self.fake_instance_obj
-        rpcapi = compute_rpcapi.ComputeAPI()
-        cctxt_mock = mock.Mock()
-        mock_client = mock.Mock()
-        rpcapi.router.client = mock.Mock()
-        rpcapi.router.client.return_value = mock_client
-        with test.nested(
-            mock.patch.object(mock_client, 'can_send_version',
-                              return_value=False),
-            mock.patch.object(mock_client, 'prepare',
-                              return_value=cctxt_mock)
-        ) as (
-            can_send_mock, prepare_mock
-        ):
-            self.assertRaises(exception.TaggedAttachmentNotSupported,
-                              rpcapi.attach_interface, ctxt, instance,
-                              'fake_network', 'fake_port', 'fake_requested_ip',
-                              tag='foo')
-        can_send_mock.assert_called_once_with('4.16')
-
-    def test_attach_interface_downgrades_version(self):
-        ctxt = context.RequestContext('fake_user', 'fake_project')
-        instance = self.fake_instance_obj
-        rpcapi = compute_rpcapi.ComputeAPI()
-        call_mock = mock.Mock()
-        cctxt_mock = mock.Mock(call=call_mock)
-        mock_client = mock.Mock()
-        rpcapi.router.client = mock.Mock()
-        rpcapi.router.client.return_value = mock_client
-        with test.nested(
-            mock.patch.object(mock_client, 'can_send_version',
-                              return_value=False),
-            mock.patch.object(mock_client, 'prepare',
-                              return_value=cctxt_mock)
-        ) as (
-            can_send_mock, prepare_mock
-        ):
-            rpcapi.attach_interface(ctxt, instance, 'fake_network',
-                                    'fake_port', 'fake_requested_ip')
-
-        can_send_mock.assert_called_once_with('4.16')
-        prepare_mock.assert_called_once_with(server=instance['host'],
-                                             version='4.0')
-        call_mock.assert_called_once_with(ctxt, 'attach_interface',
-                                          instance=instance,
-                                          network_id='fake_network',
-                                          port_id='fake_port',
-                                          requested_ip='fake_requested_ip')
+                port_id='id2', version='4.0', requested_ip='192.168.1.50')
 
     def test_attach_volume(self):
         self._test_compute_api('attach_volume', 'cast',
@@ -279,9 +225,9 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
         rpcapi = compute_rpcapi.ComputeAPI()
         cast_mock = mock.Mock()
         cctxt_mock = mock.Mock(cast=cast_mock)
-        rpcapi.router.client = mock.Mock()
+        rpcapi.router.by_instance = mock.Mock()
         mock_client = mock.Mock()
-        rpcapi.router.client.return_value = mock_client
+        rpcapi.router.by_instance.return_value = mock_client
         with test.nested(
             mock.patch.object(mock_client, 'can_send_version',
                               return_value=False),
@@ -331,7 +277,7 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
         expected_args = {'instance': self.fake_instance_obj}
         self._test_compute_api('get_instance_diagnostics', 'call',
                 expected_args, instance=self.fake_instance_obj,
-                version='4.14')
+                version='4.13')
 
     def test_get_vnc_console(self):
         self._test_compute_api('get_vnc_console', 'call',
@@ -389,9 +335,9 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
         ctxt = context.RequestContext('fake_user', 'fake_project')
         version = '4.12'
         rpcapi = compute_rpcapi.ComputeAPI()
-        rpcapi.router.client = mock.Mock()
+        rpcapi.router.by_host = mock.Mock()
         mock_client = mock.MagicMock()
-        rpcapi.router.client.return_value = mock_client
+        rpcapi.router.by_host.return_value = mock_client
         mock_client.can_send_version.return_value = True
         mock_cctx = mock.MagicMock()
         mock_client.prepare.return_value = mock_cctx
@@ -410,9 +356,9 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
         version = '4.9'
         ctxt = context.RequestContext('fake_user', 'fake_project')
         rpcapi = compute_rpcapi.ComputeAPI()
-        rpcapi.router.client = mock.Mock()
+        rpcapi.router.by_host = mock.Mock()
         mock_client = mock.MagicMock()
-        rpcapi.router.client.return_value = mock_client
+        rpcapi.router.by_host.return_value = mock_client
         mock_client.can_send_version.return_value = False
         mock_cctx = mock.MagicMock()
         mock_client.prepare.return_value = mock_cctx
@@ -447,29 +393,7 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
     def test_swap_volume(self):
         self._test_compute_api('swap_volume', 'cast',
                 instance=self.fake_instance_obj, old_volume_id='oldid',
-                new_volume_id='newid', new_attachment_id=uuids.attachment_id,
-                version='4.17')
-
-    def test_swap_volume_cannot_send_version_4_17(self):
-        """Tests that if the RPC client cannot send version 4.17 we drop back
-        to version 4.0 and don't send the new_attachment_id kwarg.
-        """
-        rpcapi = compute_rpcapi.ComputeAPI()
-        fake_context = mock.Mock()
-        fake_client = mock.Mock()
-        fake_client.can_send_version.return_value = False
-        fake_client.prepare.return_value = fake_context
-        with mock.patch.object(rpcapi.router, 'client',
-                               return_value=fake_client):
-            rpcapi.swap_volume(self.context, self.fake_instance_obj,
-                               uuids.old_volume_id, uuids.new_volume_id,
-                               uuids.new_attachment_id)
-            fake_client.prepare.assert_called_once_with(
-                server=self.fake_instance_obj.host, version='4.0')
-            fake_context.cast.assert_called_once_with(
-                self.context, 'swap_volume', instance=self.fake_instance_obj,
-                old_volume_id=uuids.old_volume_id,
-                new_volume_id=uuids.new_volume_id)
+                new_volume_id='newid')
 
     def test_restore_instance(self):
         self._test_compute_api('restore_instance', 'cast',
@@ -528,58 +452,8 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
         self._test_compute_api('reserve_block_device_name', 'call',
                 instance=self.fake_instance_obj, device='device',
                 volume_id='id', disk_bus='ide', device_type='cdrom',
-                tag='foo', version='4.15',
+                version='4.0',
                 _return_value=objects_block_dev.BlockDeviceMapping())
-
-    def test_reserve_block_device_name_raises(self):
-        ctxt = context.RequestContext('fake_user', 'fake_project')
-        instance = self.fake_instance_obj
-        rpcapi = compute_rpcapi.ComputeAPI()
-        cctxt_mock = mock.Mock()
-        mock_client = mock.Mock()
-        rpcapi.router.client = mock.Mock()
-        rpcapi.router.client.return_value = mock_client
-        with test.nested(
-            mock.patch.object(mock_client, 'can_send_version',
-                              return_value=False),
-            mock.patch.object(mock_client, 'prepare',
-                              return_value=cctxt_mock)
-        ) as (
-            can_send_mock, prepare_mock
-        ):
-            self.assertRaises(exception.TaggedAttachmentNotSupported,
-                              rpcapi.reserve_block_device_name, ctxt, instance,
-                              'fake_device', 'fake_volume_id', tag='foo')
-        can_send_mock.assert_called_once_with('4.15')
-
-    def test_reserve_block_device_name_downgrades_version(self):
-        ctxt = context.RequestContext('fake_user', 'fake_project')
-        instance = self.fake_instance_obj
-        rpcapi = compute_rpcapi.ComputeAPI()
-        call_mock = mock.Mock()
-        cctxt_mock = mock.Mock(call=call_mock)
-        mock_client = mock.Mock()
-        rpcapi.router.client = mock.Mock()
-        rpcapi.router.client.return_value = mock_client
-        with test.nested(
-            mock.patch.object(mock_client, 'can_send_version',
-                              return_value=False),
-            mock.patch.object(mock_client, 'prepare',
-                              return_value=cctxt_mock)
-        ) as (
-            can_send_mock, prepare_mock
-        ):
-            rpcapi.reserve_block_device_name(ctxt, instance, 'fake_device',
-                                             'fake_volume_id')
-
-        can_send_mock.assert_called_once_with('4.15')
-        prepare_mock.assert_called_once_with(server=instance['host'],
-                                             version='4.0')
-        call_mock.assert_called_once_with(ctxt, 'reserve_block_device_name',
-                                          instance=instance,
-                                          device='fake_device',
-                                          volume_id='fake_volume_id',
-                                          disk_bus=None, device_type=None)
 
     def test_refresh_instance_security_rules(self):
         expected_args = {'instance': self.fake_instance_obj}
@@ -751,8 +625,10 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
                                calltype='call', can_send=False):
         rpc = compute_rpcapi.ComputeAPI()
         mock_client = mock.Mock()
-        rpc.router.client = mock.Mock()
-        rpc.router.client.return_value = mock_client
+        rpc.router.by_instance = mock.Mock()
+        rpc.router.by_instance.return_value = mock_client
+        rpc.router.by_host = mock.Mock()
+        rpc.router.by_host.return_value = mock_client
 
         @mock.patch.object(compute_rpcapi, '_compute_host')
         def _test(mock_ch):
@@ -762,7 +638,19 @@ class ComputeRpcAPITestCase(test.NoDBTestCase):
             ctxt = context.RequestContext()
             result = getattr(rpc, method)(ctxt, **inargs)
             call.assert_called_once_with(ctxt, method, **callargs)
-            rpc.router.client.assert_called_once_with(ctxt)
+            # Get the target of the prepare call: prepare(server=<target>, ...)
+            prepare_target = mock_client.prepare.call_args[1]['server']
+            # If _compute_host(None, instance) was called, then by_instance
+            # should have been called with the instance. Otherwise by_host
+            # should have been called with the same host as the prepare target.
+            if mock_ch.called and mock_ch.call_args[0][0] is None:
+                instance = mock_ch.call_args[0][1]
+                rpc.router.by_instance.assert_called_once_with(ctxt, instance)
+                rpc.router.by_host.assert_not_called()
+            else:
+                rpc.router.by_host.assert_called_once_with(ctxt,
+                                                           prepare_target)
+                rpc.router.by_instance.assert_not_called()
             return result
 
         return _test()

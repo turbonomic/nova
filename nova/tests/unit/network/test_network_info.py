@@ -423,11 +423,6 @@ class VIFTests(test.NoDBTestCase):
         ] * 2
         self.assertEqual(fixed_ips, ips)
 
-    def test_vif_get_fixed_ips_network_is_none(self):
-        vif = model.VIF()
-        fixed_ips = vif.fixed_ips()
-        self.assertEqual([], fixed_ips)
-
     def test_vif_get_floating_ips(self):
         vif = fake_network_cache_model.new_vif()
         vif['network']['subnets'][0]['ips'][0].add_floating_ip('192.168.1.1')
@@ -652,7 +647,7 @@ iface eth0 inet static
         template = self._setup_injected_network_scenario(dns=False)
         self.assertEqual(expected, template)
 
-    def test_injection_static_overridden_template(self):
+    def test_injection_static_overriden_template(self):
         cfg.CONF.set_override(
             'injected_network_template',
             'nova/tests/unit/network/interfaces-override.template')
@@ -861,20 +856,16 @@ iface eth1 inet static
 class TestNetworkMetadata(test.NoDBTestCase):
     def setUp(self):
         super(TestNetworkMetadata, self).setUp()
-        self.netinfo = self._new_netinfo()
-
-    def _new_netinfo(self, vif_type='ethernet'):
-        netinfo = model.NetworkInfo([fake_network_cache_model.new_vif(
-            {'type': vif_type})])
+        self.netinfo = model.NetworkInfo([fake_network_cache_model.new_vif(
+            {'type': 'ethernet'})])
 
         # Give this vif ipv4 and ipv6 dhcp subnets
         ipv4_subnet = fake_network_cache_model.new_subnet(version=4)
         ipv6_subnet = fake_network_cache_model.new_subnet(version=6)
 
-        netinfo[0]['network']['subnets'][0] = ipv4_subnet
-        netinfo[0]['network']['subnets'][1] = ipv6_subnet
-        netinfo[0]['network']['meta']['mtu'] = 1500
-        return netinfo
+        self.netinfo[0]['network']['subnets'][0] = ipv4_subnet
+        self.netinfo[0]['network']['subnets'][1] = ipv6_subnet
+        self.netinfo[0]['network']['meta']['mtu'] = 1500
 
     def test_get_network_metadata_json(self):
 
@@ -911,8 +902,6 @@ class TestNetworkMetadata(test.NoDBTestCase):
                         'gateway': '192.168.1.1'
                     }
                 ],
-                'services': [{'address': '1.2.3.4', 'type': 'dns'},
-                             {'address': '2.3.4.5', 'type': 'dns'}],
                 'network_id': 1
             },
             net_metadata['networks'][0])
@@ -936,8 +925,6 @@ class TestNetworkMetadata(test.NoDBTestCase):
                         'gateway': 'fd00::1:1'
                     }
                 ],
-                'services': [{'address': '1:2:3:4::', 'type': 'dns'},
-                             {'address': '2:3:4:5::', 'type': 'dns'}],
                 'network_id': 1
             },
             net_metadata['networks'][1])
@@ -972,50 +959,6 @@ class TestNetworkMetadata(test.NoDBTestCase):
             },
             net_metadata['networks'][1])
 
-    def _test_get_network_metadata_json_ipv6_addr_mode(self, mode):
-        ipv6_subnet = fake_network_cache_model.new_subnet(
-            subnet_dict=dict(dhcp_server='1234:567::',
-                             ipv6_address_mode=mode), version=6)
-
-        self.netinfo[0]['network']['subnets'][1] = ipv6_subnet
-        net_metadata = netutils.get_network_metadata(self.netinfo)
-
-        self.assertEqual(
-            {
-                'id': 'network1',
-                'link': 'interface0',
-                'ip_address': 'fd00::2',
-                'netmask': 'ffff:ffff:ffff::',
-                'routes': [
-                    {
-                        'network': '::',
-                        'netmask': '::',
-                        'gateway': 'fd00::1'
-                    },
-                    {
-                        'network': '::',
-                        'netmask': 'ffff:ffff:ffff::',
-                        'gateway': 'fd00::1:1'
-                    }
-                ],
-                'services': [
-                    {'address': '1:2:3:4::', 'type': 'dns'},
-                    {'address': '2:3:4:5::', 'type': 'dns'}
-                ],
-                'type': 'ipv6_%s' % mode,
-                'network_id': 1
-            },
-            net_metadata['networks'][1])
-
-    def test_get_network_metadata_json_ipv6_addr_mode_slaac(self):
-        self._test_get_network_metadata_json_ipv6_addr_mode('slaac')
-
-    def test_get_network_metadata_json_ipv6_addr_mode_stateful(self):
-        self._test_get_network_metadata_json_ipv6_addr_mode('dhcpv6-stateful')
-
-    def test_get_network_metadata_json_ipv6_addr_mode_stateless(self):
-        self._test_get_network_metadata_json_ipv6_addr_mode('dhcpv6-stateless')
-
     def test__get_nets(self):
         expected_net = {
             'id': 'network0',
@@ -1032,10 +975,6 @@ class TestNetworkMetadata(test.NoDBTestCase):
                     'gateway': '192.168.1.1',
                     'netmask': '255.255.255.0',
                     'network': '0.0.0.0'}],
-                'services': [
-                    {'address': '1.2.3.4', 'type': 'dns'},
-                    {'address': '2.3.4.5', 'type': 'dns'}
-                ],
             'type': 'ipv4'
         }
         net = netutils._get_nets(
@@ -1140,8 +1079,6 @@ class TestNetworkMetadata(test.NoDBTestCase):
                             "network": "0.0.0.0"
                         }
                     ],
-                   'services': [{'address': '1.2.3.4', 'type': 'dns'},
-                                {'address': '2.3.4.5', 'type': 'dns'}],
                     "type": "ipv4"
                 },
                 {
@@ -1156,8 +1093,6 @@ class TestNetworkMetadata(test.NoDBTestCase):
                               {'gateway': 'fd00::1:1',
                                'netmask': 'ffff:ffff:ffff::',
                                'network': '::'}],
-                   'services': [{'address': '1:2:3:4::', 'type': 'dns'},
-                                {'address': '2:3:4:5::', 'type': 'dns'}],
                    'type': 'ipv6'
                 },
                 {
@@ -1174,8 +1109,6 @@ class TestNetworkMetadata(test.NoDBTestCase):
                             "network": "0.0.0.0"
                         }
                     ],
-                   'services': [{'address': '1.2.3.4', 'type': 'dns'},
-                                {'address': '2.3.4.5', 'type': 'dns'}],
                     "type": "ipv4"
                 }
             ],
@@ -1241,8 +1174,6 @@ class TestNetworkMetadata(test.NoDBTestCase):
                             "gateway": "fd00::1:1"
                         }
                     ],
-                   'services': [{'address': '1:2:3:4::', 'type': 'dns'},
-                                {'address': '2:3:4:5::', 'type': 'dns'}],
                     "ip_address": "fd00::2",
                     "id": "network0"
                 }
@@ -1262,32 +1193,3 @@ class TestNetworkMetadata(test.NoDBTestCase):
         self.netinfo[0]['network']['subnets'].pop(0)
         network_json = netutils.get_network_metadata(self.netinfo)
         self.assertEqual(expected_json, network_json)
-
-    def test_legacy_vif_types_type_passed_through(self):
-        legacy_types = [
-            model.VIF_TYPE_BRIDGE,
-            model.VIF_TYPE_DVS,
-            model.VIF_TYPE_HW_VEB,
-            model.VIF_TYPE_HYPERV,
-            model.VIF_TYPE_OVS,
-            model.VIF_TYPE_TAP,
-            model.VIF_TYPE_VHOSTUSER,
-            model.VIF_TYPE_VIF,
-        ]
-        link_types = []
-        for vif_type in legacy_types:
-            network_json = netutils.get_network_metadata(
-                self._new_netinfo(vif_type=vif_type))
-            link_types.append(network_json["links"][0]["type"])
-
-        self.assertEqual(legacy_types, link_types)
-
-    def test_new_vif_types_get_type_phy(self):
-        new_types = ["whizbang_nvf", "vswitch9"]
-        link_types = []
-        for vif_type in new_types:
-            network_json = netutils.get_network_metadata(
-                self._new_netinfo(vif_type=vif_type))
-            link_types.append(network_json["links"][0]["type"])
-
-        self.assertEqual(["phy"] * len(new_types), link_types)

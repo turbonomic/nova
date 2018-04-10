@@ -57,17 +57,16 @@ class TestCinderOverLimit(test.TestCase):
         self.api = api_fixture.api
 
     @mock.patch('nova.volume.cinder.cinderclient')
-    def test_over_limit_volumes_with_message(self, mock_cinder):
-        """Regression test for bug #1680457.
+    def test_over_limit_volumes(self, mock_cinder):
+        """Regression test for bug #1554631.
 
         When the Cinder client returns OverLimit when trying to create
-        a volume, an OverQuota exception should be raised.
+        a volume, an OverQuota exception should be raised with the value being
+        volumes.
         """
         cinder_client = mock.Mock()
         mock_cinder.return_value = cinder_client
-        msg = ("VolumeSizeExceedsLimit: Requested volume size XG is larger"
-               " than maximum allowed limit YG.")
-        exc = cinder_exceptions.OverLimit(413, message=msg)
+        exc = cinder_exceptions.OverLimit(413)
         cinder_client.volumes.create.side_effect = exc
 
         volume = {'display_name': 'vol1', 'size': 3}
@@ -75,7 +74,7 @@ class TestCinderOverLimit(test.TestCase):
                               self.api.post_volume, {'volume': volume})
         self.assertEqual(403, e.response.status_code)
         # Make sure we went over on volumes
-        self.assertIn('VolumeSizeExceedsLimit', e.response.text)
+        self.assertIn('volumes', e.response.text)
 
     @mock.patch('nova.volume.cinder.cinderclient')
     def test_over_limit_snapshots(self, mock_cinder):

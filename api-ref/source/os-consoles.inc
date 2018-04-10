@@ -6,8 +6,6 @@
 
 Manages server consoles.
 
-.. note:: This is only used in Xenserver VNC Proxy.
-
 Lists Consoles
 ==============
 

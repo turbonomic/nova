@@ -23,6 +23,7 @@ import six
 from nova import exception
 from nova.network import model as network_model
 from nova.objects import fields
+from nova import signature_utils
 from nova import test
 from nova.tests.unit import fake_instance
 from nova import utils
@@ -329,6 +330,25 @@ class TestVMMode(TestField):
         self.assertRaises(exception.InvalidVirtualMachineMode,
                           fields.VMMode.canonicalize,
                           'invalid')
+
+
+class TestImageSignatureTypes(TestField):
+    # Ensure that the object definition is updated
+    # in step with the signature_utils module
+    def setUp(self):
+        super(TestImageSignatureTypes, self).setUp()
+        self.hash_field = fields.ImageSignatureHashType()
+        self.key_type_field = fields.ImageSignatureKeyType()
+
+    def test_hashes(self):
+        for hash_name in list(signature_utils.HASH_METHODS.keys()):
+            self.assertIn(hash_name, self.hash_field.ALL)
+
+    def test_key_types(self):
+        key_type_dict = signature_utils.SignatureKeyType._REGISTERED_TYPES
+        key_types = list(key_type_dict.keys())
+        for key_type in key_types:
+            self.assertIn(key_type, self.key_type_field.ALL)
 
 
 class TestResourceClass(TestString):
@@ -640,6 +660,28 @@ class TestNotificationAction(TestField):
         self.assertRaises(ValueError, self.field.stringify, 'magic')
 
 
+class TestPCIAddress(TestField):
+    def setUp(self):
+        super(TestPCIAddress, self).setUp()
+        self.field = fields.Field(fields.PCIAddressField())
+        self.coerce_good_values = [('0000:00:02.0', '0000:00:02.0')]
+        self.coerce_bad_values = [
+            '000:00:02.0',
+            '0000:0:02.0',
+            '0000:00:2.0',
+            '0000:00:02.',
+            '-000:00:02.0',
+            '0000:0-:02.0',
+            '0000:00:-2.0',
+            '0000:00:02.-',
+            '000000:02.0',
+            '0000:0:02.0',
+            '0000:00:020',
+        ]
+        self.to_primitive_values = self.coerce_good_values
+        self.from_primitive_values = self.coerce_good_values
+
+
 class TestUSBAddress(TestField):
     def setUp(self):
         super(TestUSBAddress, self).setUp()
@@ -680,20 +722,6 @@ class TestIDEAddress(TestField):
             '0:2',
             '00',
             '0',
-        ]
-        self.to_primitive_values = self.coerce_good_values
-        self.from_primitive_values = self.coerce_good_values
-
-
-class TestXenAddress(TestField):
-    def setUp(self):
-        super(TestXenAddress, self).setUp()
-        self.field = fields.Field(fields.XenAddressField())
-        self.coerce_good_values = [('000100', '000100'),
-                                   ('768', '768')]
-        self.coerce_bad_values = [
-            '1',
-            '00100',
         ]
         self.to_primitive_values = self.coerce_good_values
         self.from_primitive_values = self.coerce_good_values

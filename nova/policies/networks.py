@@ -23,48 +23,15 @@ POLICY_ROOT = 'os_compute_api:os-networks:%s'
 
 
 networks_policies = [
-    policy.DocumentedRuleDefault(
-        BASE_POLICY_NAME,
-        base.RULE_ADMIN_API,
-        """Create and delete a network, add and disassociate a network
-from a project.
-
-These APIs are only available with nova-network which is deprecated.""",
-        [
-            {
-                'method': 'POST',
-                'path': '/os-networks'
-            },
-            {
-                'method': 'POST',
-                'path': '/os-networks/add'
-            },
-            {
-                'method': 'DELETE',
-                'path': '/os-networks/{network_id}'
-            },
-            {
-                'method': 'POST',
-                'path': '/os-networks/{network_id}/action (disassociate)'
-            }
-        ]),
-    policy.DocumentedRuleDefault(
-        POLICY_ROOT % 'view',
-        base.RULE_ADMIN_OR_OWNER,
-        """List networks for the project and show details for a network.
-
-These APIs are proxy calls to the Network service. These are all
-deprecated.""",
-        [
-            {
-                'method': 'GET',
-                'path': '/os-networks'
-            },
-            {
-                'method': 'GET',
-                'path': '/os-networks/{network_id}'
-            }
-        ]),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    policy.RuleDefault(
+        name=BASE_POLICY_NAME,
+        check_str=base.RULE_ADMIN_API),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'view',
+        check_str=base.RULE_ADMIN_OR_OWNER),
 ]
 
 

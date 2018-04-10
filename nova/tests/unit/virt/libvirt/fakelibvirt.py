@@ -52,7 +52,6 @@ VIR_DOMAIN_XML_MIGRATABLE = 8
 VIR_DOMAIN_BLOCK_REBASE_SHALLOW = 1
 VIR_DOMAIN_BLOCK_REBASE_REUSE_EXT = 2
 VIR_DOMAIN_BLOCK_REBASE_COPY = 8
-VIR_DOMAIN_BLOCK_REBASE_COPY_DEV = 32
 
 VIR_DOMAIN_BLOCK_JOB_ABORT_ASYNC = 1
 VIR_DOMAIN_BLOCK_JOB_ABORT_PIVOT = 2
@@ -1054,13 +1053,12 @@ class Connection(object):
                 self.host_info.cpu_cores,
                 self.host_info.cpu_threads]
 
-    def lookupByUUIDString(self, uuid):
-        for vm in self._vms.values():
-            if vm.UUIDString() == uuid:
-                return vm
+    def lookupByName(self, name):
+        if name in self._vms:
+            return self._vms[name]
         raise make_libvirtError(
                 libvirtError,
-                'Domain not found: no domain with matching uuid "%s"' % uuid,
+                'Domain not found: no domain with matching name "%s"' % name,
                 error_code=VIR_ERR_NO_DOMAIN,
                 error_domain=VIR_FROM_QEMU)
 

@@ -17,6 +17,9 @@ from nova.virt import netutils
 
 
 class TestNetUtilsTestCase(test.NoDBTestCase):
+    def setUp(self):
+        super(TestNetUtilsTestCase, self).setUp()
+
     def test_get_cached_vifs_with_vlan_no_nw_info(self):
         # Make sure that an empty dictionary will be returned when
         # nw_info is None

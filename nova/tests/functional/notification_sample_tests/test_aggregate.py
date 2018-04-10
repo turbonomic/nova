@@ -25,15 +25,17 @@ class TestAggregateNotificationSample(
         aggregate = self.admin_api.post_aggregate(aggregate_req)
 
         self.assertEqual(2, len(fake_notifier.VERSIONED_NOTIFICATIONS))
+        # The uuid hasn't been exposed on the REST API yet so we have no way to
+        # match it here, now.
         self._verify_notification(
             'aggregate-create-start',
             replacements={
-                'uuid': aggregate['uuid']},
+                'uuid': self.ANY},
             actual=fake_notifier.VERSIONED_NOTIFICATIONS[0])
         self._verify_notification(
             'aggregate-create-end',
             replacements={
-                'uuid': aggregate['uuid'],
+                'uuid': self.ANY,
                 'id': aggregate['id']},
             actual=fake_notifier.VERSIONED_NOTIFICATIONS[1])
 
@@ -43,12 +45,12 @@ class TestAggregateNotificationSample(
         self._verify_notification(
             'aggregate-delete-start',
             replacements={
-                'uuid': aggregate['uuid'],
+                'uuid': self.ANY,
                 'id': aggregate['id']},
             actual=fake_notifier.VERSIONED_NOTIFICATIONS[2])
         self._verify_notification(
             'aggregate-delete-end',
             replacements={
-                'uuid': aggregate['uuid'],
+                'uuid': self.ANY,
                 'id': aggregate['id']},
             actual=fake_notifier.VERSIONED_NOTIFICATIONS[3])

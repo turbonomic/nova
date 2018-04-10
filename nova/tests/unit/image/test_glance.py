@@ -18,11 +18,9 @@ import copy
 import datetime
 
 import cryptography
-from cursive import exception as cursive_exception
 import glanceclient.exc
 from glanceclient.v1 import images
 import glanceclient.v2.schemas as schemas
-from keystoneauth1 import loading as ks_loading
 import mock
 import six
 from six.moves import StringIO
@@ -32,7 +30,6 @@ import nova.conf
 from nova import context
 from nova import exception
 from nova.image import glance
-from nova import service_auth
 from nova import test
 from nova.tests import uuidsentinel as uuids
 
@@ -189,11 +186,6 @@ image_fixtures = {
 }
 
 
-def fake_glance_response(data):
-    with mock.patch('glanceclient.common.utils._extract_request_id'):
-        return glanceclient.common.utils.RequestIdProxy([data, None])
-
-
 class ImageV2(dict):
     # Wrapper class that is used to comply with dual nature of
     # warlock objects, that are inherited from dict and have 'schema'
@@ -347,51 +339,50 @@ class TestGetImageService(test.NoDBTestCase):
 
 
 class TestCreateGlanceClient(test.NoDBTestCase):
-
-    @mock.patch.object(service_auth, 'get_auth_plugin')
-    @mock.patch.object(ks_loading, 'load_session_from_conf_options')
     @mock.patch('glanceclient.Client')
-    def test_glanceclient_with_ks_session(self, mock_client, mock_load,
-                                          mock_get_auth):
-        session = "fake_session"
-        mock_load.return_value = session
-        auth = "fake_auth"
-        mock_get_auth.return_value = auth
-        ctx = context.RequestContext('fake', 'fake', global_request_id='reqid')
-        endpoint = "fake_endpoint"
-        mock_client.side_effect = ["a", "b"]
+    def test_headers_passed_glanceclient(self, init_mock):
+        self.flags(auth_strategy='keystone', group='api')
+        auth_token = 'token'
+        ctx = context.RequestContext('fake', 'fake', auth_token=auth_token)
 
-        # Reset the cache, so we know its empty before we start
-        glance._SESSION = None
-
-        result1 = glance._glanceclient_from_endpoint(ctx, endpoint, 2)
-        result2 = glance._glanceclient_from_endpoint(ctx, endpoint, 2)
-
-        # Ensure that session is only loaded once.
-        mock_load.assert_called_once_with(glance.CONF, "glance")
-        self.assertEqual(session, glance._SESSION)
-        # Ensure new client created every time
-        client_call = mock.call(2, auth="fake_auth",
-                endpoint_override=endpoint, session=session,
-                                global_request_id='reqid')
-        mock_client.assert_has_calls([client_call, client_call])
-        self.assertEqual("a", result1)
-        self.assertEqual("b", result2)
-
-    def test_generate_identity_headers(self):
-        ctx = context.RequestContext('user', 'tenant',
-                auth_token='token', roles=["a", "b"])
-
-        result = glance.generate_identity_headers(ctx, 'test')
-
-        expected = {
-            'X-Auth-Token': 'token',
-            'X-User-Id': 'user',
-            'X-Tenant-Id': 'tenant',
-            'X-Roles': 'a,b',
-            'X-Identity-Status': 'test',
+        expected_endpoint = 'http://host4:9295'
+        expected_params = {
+            'identity_headers': {
+                'X-Auth-Token': 'token',
+                'X-User-Id': 'fake',
+                'X-Roles': '',
+                'X-Tenant-Id': 'fake',
+                'X-Identity-Status': 'Confirmed'
+            }
         }
-        self.assertDictEqual(expected, result)
+        glance._glanceclient_from_endpoint(ctx, expected_endpoint, 2)
+        init_mock.assert_called_once_with('2', expected_endpoint,
+                                          **expected_params)
+
+        # Test the version is properly passed to glanceclient.
+        init_mock.reset_mock()
+
+        expected_endpoint = 'http://host4:9295'
+        expected_params = {
+            'identity_headers': {
+                'X-Auth-Token': 'token',
+                'X-User-Id': 'fake',
+                'X-Roles': '',
+                'X-Tenant-Id': 'fake',
+                'X-Identity-Status': 'Confirmed'
+            }
+        }
+        glance._glanceclient_from_endpoint(ctx, expected_endpoint, 2)
+        init_mock.assert_called_once_with('2', expected_endpoint,
+                                          **expected_params)
+
+        # Test that the IPv6 bracketization adapts the endpoint properly.
+        init_mock.reset_mock()
+
+        expected_endpoint = 'http://[host4]:9295'
+        glance._glanceclient_from_endpoint(ctx, expected_endpoint, 2)
+        init_mock.assert_called_once_with('2', expected_endpoint,
+                                          **expected_params)
 
 
 class TestGlanceClientWrapperRetries(test.NoDBTestCase):
@@ -511,6 +502,22 @@ class TestGlanceClientWrapperRetries(test.NoDBTestCase):
         create_client_mock.return_value = client_mock
 
 
+class TestGlanceClientWrapper(test.NoDBTestCase):
+
+    @mock.patch('oslo_service.sslutils.is_enabled')
+    @mock.patch('glanceclient.Client')
+    def test_create_glance_client_with_ssl(self, client_mock,
+                                           ssl_enable_mock):
+        self.flags(ca_file='foo.cert', cert_file='bar.cert',
+                   key_file='wut.key', group='ssl')
+        ctxt = mock.sentinel.ctx
+        glance._glanceclient_from_endpoint(ctxt, 'https://host4:9295', 2)
+        client_mock.assert_called_once_with(
+            '2', 'https://host4:9295', insecure=False, ssl_compression=False,
+            cert_file='bar.cert', key_file='wut.key', cacert='foo.cert',
+            identity_headers=mock.ANY)
+
+
 class TestDownloadNoDirectUri(test.NoDBTestCase):
 
     """Tests the download method of the GlanceImageServiceV2 when the
@@ -521,8 +528,7 @@ class TestDownloadNoDirectUri(test.NoDBTestCase):
     @mock.patch('nova.image.glance.GlanceImageServiceV2.show')
     def test_download_no_data_no_dest_path_v2(self, show_mock, open_mock):
         client = mock.MagicMock()
-        client.call.return_value = fake_glance_response(
-            mock.sentinel.image_chunks)
+        client.call.return_value = mock.sentinel.image_chunks
         ctx = mock.sentinel.ctx
         service = glance.GlanceImageServiceV2(client)
         res = service.download(ctx, mock.sentinel.image_id)
@@ -537,7 +543,7 @@ class TestDownloadNoDirectUri(test.NoDBTestCase):
     @mock.patch('nova.image.glance.GlanceImageServiceV2.show')
     def test_download_data_no_dest_path_v2(self, show_mock, open_mock):
         client = mock.MagicMock()
-        client.call.return_value = fake_glance_response([1, 2, 3])
+        client.call.return_value = [1, 2, 3]
         ctx = mock.sentinel.ctx
         data = mock.MagicMock()
         service = glance.GlanceImageServiceV2(client)
@@ -563,7 +569,7 @@ class TestDownloadNoDirectUri(test.NoDBTestCase):
     def test_download_no_data_dest_path_v2(self, fsync_mock, show_mock,
                                            open_mock):
         client = mock.MagicMock()
-        client.call.return_value = fake_glance_response([1, 2, 3])
+        client.call.return_value = [1, 2, 3]
         ctx = mock.sentinel.ctx
         writer = mock.MagicMock()
         open_mock.return_value = writer
@@ -596,7 +602,7 @@ class TestDownloadNoDirectUri(test.NoDBTestCase):
         # #TODO(jaypipes): Fix the aforementioned horrible design of
         # the download() method.
         client = mock.MagicMock()
-        client.call.return_value = fake_glance_response([1, 2, 3])
+        client.call.return_value = [1, 2, 3]
         ctx = mock.sentinel.ctx
         data = mock.MagicMock()
         service = glance.GlanceImageServiceV2(client)
@@ -621,7 +627,7 @@ class TestDownloadNoDirectUri(test.NoDBTestCase):
     def test_download_data_dest_path_write_fails_v2(
             self, show_mock, open_mock):
         client = mock.MagicMock()
-        client.call.return_value = fake_glance_response([1, 2, 3])
+        client.call.return_value = [1, 2, 3]
         ctx = mock.sentinel.ctx
         service = glance.GlanceImageServiceV2(client)
 
@@ -636,19 +642,6 @@ class TestDownloadNoDirectUri(test.NoDBTestCase):
 
         self.assertRaises(FakeDiskException, service.download, ctx,
                           mock.sentinel.image_id, data=Exceptionator())
-
-    @mock.patch.object(six.moves.builtins, 'open')
-    @mock.patch('nova.image.glance.GlanceImageServiceV2.show')
-    def test_download_no_returned_image_data_v2(
-            self, show_mock, open_mock):
-        """Verify images with no data are handled correctly."""
-        client = mock.MagicMock()
-        client.call.return_value = fake_glance_response(None)
-        ctx = mock.sentinel.ctx
-        service = glance.GlanceImageServiceV2(client)
-
-        with testtools.ExpectedException(exception.ImageUnacceptable):
-            service.download(ctx, mock.sentinel.image_id)
 
     @mock.patch('nova.image.glance.GlanceImageServiceV2._get_transfer_module')
     @mock.patch('nova.image.glance.GlanceImageServiceV2.show')
@@ -702,7 +695,7 @@ class TestDownloadNoDirectUri(test.NoDBTestCase):
         tran_mod.download.side_effect = Exception
         get_tran_mock.return_value = tran_mod
         client = mock.MagicMock()
-        client.call.return_value = fake_glance_response([1, 2, 3])
+        client.call.return_value = [1, 2, 3]
         ctx = mock.sentinel.ctx
         writer = mock.MagicMock()
         open_mock.return_value = writer
@@ -755,7 +748,7 @@ class TestDownloadNoDirectUri(test.NoDBTestCase):
         }
         get_tran_mock.return_value = None
         client = mock.MagicMock()
-        client.call.return_value = fake_glance_response([1, 2, 3])
+        client.call.return_value = [1, 2, 3]
         ctx = mock.sentinel.ctx
         writer = mock.MagicMock()
         open_mock.return_value = writer
@@ -818,12 +811,11 @@ class TestDownloadSignatureVerification(test.NoDBTestCase):
         }
         self.fake_img_data = ['A' * 256, 'B' * 256]
         self.client = mock.MagicMock()
-        self.client.call.return_value = fake_glance_response(
-            self.fake_img_data)
+        self.client.call.return_value = self.fake_img_data
 
     @mock.patch('nova.image.glance.LOG')
     @mock.patch('nova.image.glance.GlanceImageServiceV2.show')
-    @mock.patch('cursive.signature_utils.get_verifier')
+    @mock.patch('nova.signature_utils.get_verifier')
     def test_download_with_signature_verification_v2(self,
                                                      mock_get_verifier,
                                                      mock_show,
@@ -834,19 +826,16 @@ class TestDownloadSignatureVerification(test.NoDBTestCase):
         res = service.download(context=None, image_id=None,
                                data=None, dst_path=None)
         self.assertEqual(self.fake_img_data, res)
-        mock_get_verifier.assert_called_once_with(
-            context=None,
-            img_signature_certificate_uuid=uuids.img_sig_cert_uuid,
-            img_signature_hash_method='SHA-224',
-            img_signature='signature',
-            img_signature_key_type='RSA-PSS'
-        )
+        mock_get_verifier.assert_called_once_with(None,
+                                                  uuids.img_sig_cert_uuid,
+                                                  'SHA-224',
+                                                  'signature', 'RSA-PSS')
         mock_log.info.assert_called_once_with(mock.ANY, mock.ANY)
 
     @mock.patch.object(six.moves.builtins, 'open')
     @mock.patch('nova.image.glance.LOG')
     @mock.patch('nova.image.glance.GlanceImageServiceV2.show')
-    @mock.patch('cursive.signature_utils.get_verifier')
+    @mock.patch('nova.signature_utils.get_verifier')
     @mock.patch('os.fsync')
     def test_download_dst_path_signature_verification_v2(self,
                                                          mock_fsync,
@@ -862,13 +851,10 @@ class TestDownloadSignatureVerification(test.NoDBTestCase):
         mock_open.return_value = mock_dest
         service.download(context=None, image_id=None,
                          data=None, dst_path=fake_path)
-        mock_get_verifier.assert_called_once_with(
-            context=None,
-            img_signature_certificate_uuid=uuids.img_sig_cert_uuid,
-            img_signature_hash_method='SHA-224',
-            img_signature='signature',
-            img_signature_key_type='RSA-PSS'
-        )
+        mock_get_verifier.assert_called_once_with(None,
+                                                  uuids.img_sig_cert_uuid,
+                                                  'SHA-224',
+                                                  'signature', 'RSA-PSS')
         mock_log.info.assert_called_once_with(mock.ANY, mock.ANY)
         self.assertEqual(len(self.fake_img_data), mock_dest.write.call_count)
         self.assertTrue(mock_dest.close.called)
@@ -877,17 +863,18 @@ class TestDownloadSignatureVerification(test.NoDBTestCase):
 
     @mock.patch('nova.image.glance.LOG')
     @mock.patch('nova.image.glance.GlanceImageServiceV2.show')
-    @mock.patch('cursive.signature_utils.get_verifier')
+    @mock.patch('nova.signature_utils.get_verifier')
     def test_download_with_get_verifier_failure_v2(self,
-                                                   mock_get,
+                                                   mock_get_verifier,
                                                    mock_show,
                                                    mock_log):
         service = glance.GlanceImageServiceV2(self.client)
-        mock_get.side_effect = cursive_exception.SignatureVerificationError(
-            reason='Signature verification failed.'
-        )
+        mock_get_verifier.side_effect = exception.SignatureVerificationError(
+                                            reason='Signature verification '
+                                                   'failed.'
+                                        )
         mock_show.return_value = self.fake_img_props
-        self.assertRaises(cursive_exception.SignatureVerificationError,
+        self.assertRaises(exception.SignatureVerificationError,
                           service.download,
                           context=None, image_id=None,
                           data=None, dst_path=None)
@@ -895,7 +882,7 @@ class TestDownloadSignatureVerification(test.NoDBTestCase):
 
     @mock.patch('nova.image.glance.LOG')
     @mock.patch('nova.image.glance.GlanceImageServiceV2.show')
-    @mock.patch('cursive.signature_utils.get_verifier')
+    @mock.patch('nova.signature_utils.get_verifier')
     def test_download_with_invalid_signature_v2(self,
                                                 mock_get_verifier,
                                                 mock_show,
@@ -916,7 +903,7 @@ class TestDownloadSignatureVerification(test.NoDBTestCase):
                                                     mock_log):
         service = glance.GlanceImageServiceV2(self.client)
         mock_show.return_value = {'properties': {}}
-        self.assertRaisesRegex(cursive_exception.SignatureVerificationError,
+        self.assertRaisesRegex(exception.SignatureVerificationError,
                                'Required image properties for signature '
                                'verification do not exist. Cannot verify '
                                'signature. Missing property: .*',
@@ -925,7 +912,7 @@ class TestDownloadSignatureVerification(test.NoDBTestCase):
                                data=None, dst_path=None)
 
     @mock.patch.object(six.moves.builtins, 'open')
-    @mock.patch('cursive.signature_utils.get_verifier')
+    @mock.patch('nova.signature_utils.get_verifier')
     @mock.patch('nova.image.glance.LOG')
     @mock.patch('nova.image.glance.GlanceImageServiceV2.show')
     @mock.patch('os.fsync')
@@ -1593,16 +1580,6 @@ class TestDelete(test.NoDBTestCase):
         ctx = mock.sentinel.ctx
         service = glance.GlanceImageServiceV2(client)
         self.assertRaises(exception.ImageNotFound, service.delete, ctx,
-                          mock.sentinel.image_id)
-
-    def test_delete_client_conflict_failure_v2(self):
-        client = mock.MagicMock()
-        fake_details = 'Image %s is in use' % mock.sentinel.image_id
-        client.call.side_effect = glanceclient.exc.HTTPConflict(
-            details=fake_details)
-        ctx = mock.sentinel.ctx
-        service = glance.GlanceImageServiceV2(client)
-        self.assertRaises(exception.ImageDeleteConflict, service.delete, ctx,
                           mock.sentinel.image_id)
 
 

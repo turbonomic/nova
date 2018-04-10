@@ -12,8 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import sys
-
 import fixtures
 import oslo_messaging as messaging
 
@@ -30,16 +28,13 @@ class CastAsCall(fixtures.Fixture):
     See Ia7f40718533e450f00cd3e7d753ac65755c70588 for more background.
     """
 
-    def __init__(self, testcase):
+    def __init__(self, stubs):
         super(CastAsCall, self).__init__()
-        self.testcase = testcase
+        self.stubs = stubs
 
     @staticmethod
-    def _stub_out(testcase, obj=None):
-        if obj:
-            orig_prepare = obj.prepare
-        else:
-            orig_prepare = messaging.RPCClient.prepare
+    def _stub_out(stubs, obj):
+        orig_prepare = obj.prepare
 
         def prepare(self, *args, **kwargs):
             # Casts with fanout=True would throw errors if its monkeypatched to
@@ -47,23 +42,12 @@ class CastAsCall(fixtures.Fixture):
             if 'fanout' in kwargs:
                 kwargs['fanout'] = False
             cctxt = orig_prepare(self, *args, **kwargs)
-            CastAsCall._stub_out(testcase, cctxt)  # woo, recurse!
+            CastAsCall._stub_out(stubs, cctxt)  # woo, recurse!
             return cctxt
 
-        if obj:
-            cls = getattr(sys.modules[obj.__class__.__module__],
-                          obj.__class__.__name__)
-            testcase.stub_out('%s.%s.prepare' % (obj.__class__.__module__,
-                                                 obj.__class__.__name__),
-                              prepare)
-            testcase.stub_out('%s.%s.cast' % (obj.__class__.__module__,
-                                              obj.__class__.__name__),
-                              cls.call)
-        else:
-            testcase.stub_out('oslo_messaging.RPCClient.prepare', prepare)
-            testcase.stub_out('oslo_messaging.RPCClient.cast',
-                              messaging.RPCClient.call)
+        stubs.Set(obj, 'prepare', prepare)
+        stubs.Set(obj, 'cast', obj.call)
 
     def setUp(self):
         super(CastAsCall, self).setUp()
-        self._stub_out(self.testcase)
+        self._stub_out(self.stubs, messaging.RPCClient)

@@ -28,8 +28,6 @@ CONF = nova.conf.CONF
 class IoOpsFilter(filters.BaseHostFilter):
     """Filter out hosts with too many concurrent I/O operations."""
 
-    RUN_ON_REBUILD = False
-
     def _get_max_io_ops_per_host(self, host_state, spec_obj):
         return CONF.filter_scheduler.max_io_ops_per_host
 

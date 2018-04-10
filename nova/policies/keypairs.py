@@ -23,7 +23,10 @@ POLICY_ROOT = 'os_compute_api:os-keypairs:%s'
 
 
 keypairs_policies = [
-    policy.DocumentedRuleDefault(
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    base.create_rule_default(
         POLICY_ROOT % 'index',
         'rule:admin_api or user_id:%(user_id)s',
         "List all keypairs",
@@ -33,7 +36,7 @@ keypairs_policies = [
                 'method': 'GET'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'create',
         'rule:admin_api or user_id:%(user_id)s',
         "Create a keypair",
@@ -43,7 +46,7 @@ keypairs_policies = [
                 'method': 'POST'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'delete',
         'rule:admin_api or user_id:%(user_id)s',
         "Delete a keypair",
@@ -53,7 +56,7 @@ keypairs_policies = [
                 'method': 'DELETE'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'show',
         'rule:admin_api or user_id:%(user_id)s',
         "Show details of a keypair",
@@ -63,20 +66,9 @@ keypairs_policies = [
                 'method': 'GET'
             }
         ]),
-    policy.DocumentedRuleDefault(
-        BASE_POLICY_NAME,
-        base.RULE_ADMIN_OR_OWNER,
-        "Return 'key_name' in the response of server.",
-        [
-            {
-                'path': '/servers/{id}',
-                'method': 'GET',
-            },
-            {
-                'path': '/servers/detail',
-                'method': 'GET'
-            }
-        ]),
+    policy.RuleDefault(
+        name=BASE_POLICY_NAME,
+        check_str=base.RULE_ADMIN_OR_OWNER),
 ]
 
 

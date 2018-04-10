@@ -24,12 +24,14 @@ BASE_POLICY_RULE = 'rule:%s' % BASE_POLICY_NAME
 
 
 server_groups_policies = [
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
     # TODO(Kevin_Zheng): remove this rule as this not used by any API
     policy.RuleDefault(
         name=BASE_POLICY_NAME,
-        check_str=base.RULE_ADMIN_OR_OWNER,
-        description='Deprecated in Pike and will be removed in next release'),
-    policy.DocumentedRuleDefault(
+        check_str=base.RULE_ADMIN_OR_OWNER),
+    base.create_rule_default(
         POLICY_ROOT % 'create',
         BASE_POLICY_RULE,
         "Create a new server group",
@@ -40,7 +42,7 @@ server_groups_policies = [
             }
         ]
     ),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'delete',
         BASE_POLICY_RULE,
         "Delete a server group",
@@ -51,7 +53,7 @@ server_groups_policies = [
             }
         ]
     ),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'index',
         BASE_POLICY_RULE,
         "List all server groups",
@@ -62,7 +64,7 @@ server_groups_policies = [
             }
         ]
     ),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'show',
         BASE_POLICY_RULE,
         "Show details of a server group",

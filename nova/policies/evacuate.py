@@ -19,10 +19,14 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-evacuate'
+POLICY_ROOT = 'os_compute_api:os-evacuate:%s'
 
 
 evacuate_policies = [
-    policy.DocumentedRuleDefault(
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    base.create_rule_default(
         BASE_POLICY_NAME,
         base.RULE_ADMIN_API,
         "Evacuate a server from a failed host to a new host",

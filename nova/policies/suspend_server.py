@@ -22,7 +22,7 @@ POLICY_ROOT = 'os_compute_api:os-suspend-server:%s'
 
 
 suspend_server_policies = [
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'resume',
         base.RULE_ADMIN_OR_OWNER,
         "Resume suspended server",
@@ -32,7 +32,7 @@ suspend_server_policies = [
                 'path': '/servers/{server_id}/action (resume)'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'suspend',
         base.RULE_ADMIN_OR_OWNER,
         "Suspend server",
@@ -42,6 +42,9 @@ suspend_server_policies = [
                 'path': '/servers/{server_id}/action (suspend)'
             }
         ]),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
 ]
 
 

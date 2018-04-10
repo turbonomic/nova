@@ -20,7 +20,6 @@ import mock
 import os_vif
 from os_vif import exception as osv_exception
 from os_vif import objects as osv_objects
-from os_vif.objects import fields as osv_fields
 from oslo_concurrency import processutils
 from oslo_config import cfg
 import six
@@ -105,50 +104,12 @@ class LibvirtVifTestCase(test.NoDBTestCase):
         bridge_interface=None,
         vlan=99)
 
-    vif_agilio_ovs = network_model.VIF(id='vif-xxx-yyy-zzz',
-        address='ca:fe:de:ad:be:ef',
-        network=network_ovs,
-        type=network_model.VIF_TYPE_AGILIO_OVS,
-        details={'port_filter': False},
-        devname='tap-xxx-yyy-zzz',
-        ovs_interfaceid='aaa-bbb-ccc')
-
-    vif_agilio_ovs_direct = network_model.VIF(id='vif-xxx-yyy-zzz',
-        address='ca:fe:de:ad:be:ef',
-        network=network_ovs,
-        type=network_model.VIF_TYPE_AGILIO_OVS,
-        vnic_type=network_model.VNIC_TYPE_DIRECT,
-        ovs_interfaceid='aaa-bbb-ccc',
-        devname='tap-xxx-yyy-zzz',
-        profile={'pci_slot': '0000:0a:00.1'})
-
-    vif_agilio_ovs_forwarder = network_model.VIF(id='vif-xxx-yyy-zzz',
-        address='ca:fe:de:ad:be:ef',
-        network=network_ovs,
-        type=network_model.VIF_TYPE_AGILIO_OVS,
-        vnic_type=network_model.VNIC_TYPE_VIRTIO_FORWARDER,
-        profile={'pci_slot': '0000:0a:00.1'},
-        details={
-            network_model.VIF_DETAILS_VHOSTUSER_MODE: 'client',
-            network_model.VIF_DETAILS_VHOSTUSER_SOCKET: '/tmp/usv-xxx-yyy-zzz',
-            network_model.VIF_DETAILS_VHOSTUSER_OVS_PLUG: True},
-        ovs_interfaceid='aaa-bbb-ccc', mtu=1500)
-
     vif_ovs = network_model.VIF(id='vif-xxx-yyy-zzz',
         address='ca:fe:de:ad:be:ef',
         network=network_ovs,
         type=network_model.VIF_TYPE_OVS,
         details={'port_filter': False},
         devname='tap-xxx-yyy-zzz',
-        ovs_interfaceid='aaa-bbb-ccc')
-
-    vif_ovs_direct = network_model.VIF(id='vif-xxx-yyy-zzz',
-        address='ca:fe:de:ad:be:ef',
-        network=network_ovs,
-        vnic_type=network_model.VNIC_TYPE_DIRECT,
-        profile={'pci_slot': '0000:0a:00.1'},
-        type=network_model.VIF_TYPE_OVS,
-        details={'port_filter': False},
         ovs_interfaceid='aaa-bbb-ccc')
 
     vif_ovs_hybrid = network_model.VIF(id='vif-xxx-yyy-zzz',
@@ -408,41 +369,6 @@ class LibvirtVifTestCase(test.NoDBTestCase):
             interface_id="07bd6cea-fb37-4594-b769-90fc51854ee9",
             profile_id="fishfood")
 
-        self.os_vif_repr_prof = osv_objects.vif.VIFPortProfileOVSRepresentor(
-            interface_id="07bd6cea-fb37-4594-b769-90fc51854ee9",
-            profile_id="fishfood",
-            representor_name='nicdc065497-3c',
-            representor_address='0000:0a:00.1')
-
-        self.os_vif_agilio_ovs = osv_objects.vif.VIFOpenVSwitch(
-            id="dc065497-3c8d-4f44-8fb4-e1d33c16a536",
-            address="22:52:25:62:e2:aa",
-            plugin="agilio_ovs",
-            vif_name="nicdc065497-3c",
-            bridge_name="br0",
-            port_profile=self.os_vif_ovs_prof,
-            network=self.os_vif_network)
-
-        self.os_vif_agilio_forwarder = osv_objects.vif.VIFVHostUser(
-            id="dc065497-3c8d-4f44-8fb4-e1d33c16a536",
-            address="22:52:25:62:e2:aa",
-            plugin="agilio_ovs",
-            vif_name="nicdc065497-3c",
-            path='/var/run/openvswitch/vhudc065497-3c',
-            mode='client',
-            port_profile=self.os_vif_repr_prof,
-            network=self.os_vif_network)
-
-        self.os_vif_agilio_direct = osv_objects.vif.VIFHostDevice(
-            id="dc065497-3c8d-4f44-8fb4-e1d33c16a536",
-            address="22:52:25:62:e2:aa",
-            plugin="agilio_ovs",
-            vif_name="nicdc065497-3c",
-            dev_type=osv_fields.VIFHostDeviceDevType.ETHERNET,
-            dev_address='0000:0a:00.1',
-            port_profile=self.os_vif_repr_prof,
-            network=self.os_vif_network)
-
         self.os_vif_ovs = osv_objects.vif.VIFOpenVSwitch(
             id="dc065497-3c8d-4f44-8fb4-e1d33c16a536",
             address="22:52:25:62:e2:aa",
@@ -472,24 +398,6 @@ class LibvirtVifTestCase(test.NoDBTestCase):
             port_profile=self.os_vif_ovs_prof,
             network=self.os_vif_network)
 
-        self.os_vif_hostdevice_ethernet = osv_objects.vif.VIFHostDevice(
-            id="dc065497-3c8d-4f44-8fb4-e1d33c16a536",
-            address="22:52:25:62:e2:aa",
-            plugin="linux_bridge",
-            vif_name="nicdc065497-3c",
-            dev_type=osv_fields.VIFHostDeviceDevType.ETHERNET,
-            dev_address='0000:0a:00.1',
-            network=self.os_vif_network)
-
-        self.os_vif_hostdevice_generic = osv_objects.vif.VIFHostDevice(
-            id="dc065497-3c8d-4f44-8fb4-e1d33c16a536",
-            address="22:52:25:62:e2:aa",
-            plugin="linux_bridge",
-            vif_name="nicdc065497-3c",
-            dev_type=osv_fields.VIFHostDeviceDevType.GENERIC,
-            dev_address='0000:0a:00.1',
-            network=self.os_vif_network)
-
         self.os_vif_inst_info = osv_objects.instance_info.InstanceInfo(
             uuid="d5b1090c-9e00-4fa4-9504-4b1494857970",
             name="instance-000004da",
@@ -498,7 +406,8 @@ class LibvirtVifTestCase(test.NoDBTestCase):
     def setUp(self):
         super(LibvirtVifTestCase, self).setUp()
         self.useFixture(fakelibvirt.FakeLibvirtFixture(stub_os_vif=False))
-        self.flags(firewall_driver=None)
+        self.flags(allow_same_net_traffic=True,
+                   firewall_driver=None)
         # os_vif.initialize is typically done in nova-compute startup
         os_vif.initialize()
         self.setup_os_vif_objects()
@@ -1489,41 +1398,6 @@ class LibvirtVifTestCase(test.NoDBTestCase):
         self._assertMacEquals(node, self.vif_vhostuser_ovs)
         self._assertModel(xml, network_model.VIF_MODEL_VIRTIO)
 
-    def test_ovs_direct(self):
-        d = vif.LibvirtGenericVIFDriver()
-        xml = self._get_instance_xml(d, self.vif_ovs_direct)
-        node = self._get_node(xml)
-        self._assertTypeAndPciEquals(node,
-                                     "hostdev",
-                                     self.vif_ovs_direct)
-        self._assertMacEquals(node, self.vif_ovs_direct)
-
-    def test_agilio_ovs_direct(self):
-        d = vif.LibvirtGenericVIFDriver()
-        xml = self._get_instance_xml(d, self.vif_agilio_ovs_direct)
-        node = self._get_node(xml)
-        self._assertTypeAndPciEquals(node,
-                                     "hostdev",
-                                     self.vif_agilio_ovs_direct)
-        self._assertMacEquals(node, self.vif_agilio_ovs_direct)
-
-    def test_agilio_ovs_forwarder(self):
-        d = vif.LibvirtGenericVIFDriver()
-        xml = self._get_instance_xml(d,
-                                     self.vif_agilio_ovs_forwarder)
-        node = self._get_node(xml)
-        self.assertEqual(node.get("type"),
-                         network_model.VIF_TYPE_VHOSTUSER)
-
-        self._assertTypeEquals(node, network_model.VIF_TYPE_VHOSTUSER,
-                               "source", "mode", "client")
-        self._assertTypeEquals(node, network_model.VIF_TYPE_VHOSTUSER,
-                               "source", "path", "/tmp/usv-xxx-yyy-zzz")
-        self._assertTypeEquals(node, network_model.VIF_TYPE_VHOSTUSER,
-                               "source", "type", "unix")
-        self._assertMacEquals(node, self.vif_agilio_ovs_forwarder)
-        self._assertModel(xml, network_model.VIF_MODEL_VIRTIO)
-
     @mock.patch("nova.network.os_vif_util.nova_to_osvif_instance")
     @mock.patch("nova.network.os_vif_util.nova_to_osvif_vif")
     @mock.patch.object(os_vif, "plug")
@@ -1631,86 +1505,6 @@ class LibvirtVifTestCase(test.NoDBTestCase):
 
     @mock.patch("nova.network.os_vif_util.nova_to_osvif_instance")
     @mock.patch("nova.network.os_vif_util.nova_to_osvif_vif")
-    def test_config_os_vif_agilio_ovs_fallthrough(self, mock_convert_vif,
-                                                  mock_convert_inst):
-        mock_convert_vif.return_value = self.os_vif_agilio_ovs
-        mock_convert_inst.return_value = self.os_vif_inst_info
-
-        d = vif.LibvirtGenericVIFDriver()
-        hostimpl = host.Host("qemu:///system")
-        flavor = objects.Flavor(name='m1.small')
-        image_meta = objects.ImageMeta.from_dict({})
-        d = vif.LibvirtGenericVIFDriver()
-        cfg = d.get_config(self.instance, self.vif_agilio_ovs,
-                           image_meta, flavor,
-                           CONF.libvirt.virt_type,
-                           hostimpl)
-
-        self._assertXmlEqual("""
-            <interface type="bridge">
-                <mac address="22:52:25:62:e2:aa"/>
-                <model type="virtio"/>
-                <source bridge="br0"/>
-                <target dev="nicdc065497-3c"/>
-                <virtualport type="openvswitch">
-                    <parameters
-                     interfaceid="07bd6cea-fb37-4594-b769-90fc51854ee9"/>
-                </virtualport>
-            </interface>""", cfg.to_xml())
-
-    @mock.patch("nova.network.os_vif_util.nova_to_osvif_instance")
-    @mock.patch("nova.network.os_vif_util.nova_to_osvif_vif")
-    def test_config_os_vif_agilio_ovs_forwarder(self, mock_convert_vif,
-                                                mock_convert_inst):
-        mock_convert_vif.return_value = self.os_vif_agilio_forwarder
-        mock_convert_inst.return_value = self.os_vif_inst_info
-
-        d = vif.LibvirtGenericVIFDriver()
-        hostimpl = host.Host("qemu:///system")
-        flavor = objects.Flavor(name='m1.small')
-        image_meta = objects.ImageMeta.from_dict({})
-        d = vif.LibvirtGenericVIFDriver()
-        cfg = d.get_config(self.instance, self.vif_agilio_ovs_forwarder,
-                           image_meta, flavor,
-                           CONF.libvirt.virt_type,
-                           hostimpl)
-
-        self._assertXmlEqual("""
-            <interface type="vhostuser">
-              <mac address="22:52:25:62:e2:aa"/>
-              <model type="virtio"/>
-              <source mode="client"
-               path="/var/run/openvswitch/vhudc065497-3c" type="unix"/>
-            </interface>""", cfg.to_xml())
-
-    @mock.patch("nova.network.os_vif_util.nova_to_osvif_instance")
-    @mock.patch("nova.network.os_vif_util.nova_to_osvif_vif")
-    def test_config_os_vif_agilio_ovs_direct(self, mock_convert_vif,
-                                             mock_convert_inst):
-        mock_convert_vif.return_value = self.os_vif_agilio_direct
-        mock_convert_inst.return_value = self.os_vif_inst_info
-
-        d = vif.LibvirtGenericVIFDriver()
-        hostimpl = host.Host("qemu:///system")
-        flavor = objects.Flavor(name='m1.small')
-        image_meta = objects.ImageMeta.from_dict({})
-        d = vif.LibvirtGenericVIFDriver()
-        cfg = d.get_config(self.instance, self.vif_agilio_ovs_direct,
-                           image_meta, flavor,
-                           CONF.libvirt.virt_type,
-                           hostimpl)
-
-        self._assertXmlEqual("""
-            <interface type="hostdev" managed="yes">
-              <mac address="22:52:25:62:e2:aa"/>
-              <source>
-                <address type="pci" domain="0x0000"
-                 bus="0x0a" slot="0x00" function="0x1"/>
-              </source>
-            </interface>""", cfg.to_xml())
-
-    @mock.patch("nova.network.os_vif_util.nova_to_osvif_instance")
-    @mock.patch("nova.network.os_vif_util.nova_to_osvif_vif")
     def test_config_os_vif_ovs(self, mock_convert_vif, mock_convert_inst):
         mock_convert_vif.return_value = self.os_vif_ovs
         mock_convert_inst.return_value = self.os_vif_inst_info
@@ -1763,45 +1557,3 @@ class LibvirtVifTestCase(test.NoDBTestCase):
                 <filterref
                  filter="nova-instance-instance-00000001-22522562e2aa"/>
             </interface>""", cfg.to_xml())
-
-    @mock.patch("nova.network.os_vif_util.nova_to_osvif_instance")
-    @mock.patch("nova.network.os_vif_util.nova_to_osvif_vif")
-    def test_config_os_vif_hostdevice_ethernet(self, mock_convert_vif,
-                                               mock_convert_inst):
-        mock_convert_vif.return_value = self.os_vif_hostdevice_ethernet
-        mock_convert_inst.return_value = self.os_vif_inst_info
-
-        hostimpl = host.Host("qemu:///system")
-        flavor = objects.Flavor(name='m1.small')
-        image_meta = objects.ImageMeta.from_dict({})
-        d = vif.LibvirtGenericVIFDriver()
-        cfg = d.get_config(self.instance, self.vif_bridge,
-                           image_meta, flavor,
-                           CONF.libvirt.virt_type,
-                           hostimpl)
-
-        self._assertXmlEqual("""
-            <interface type="hostdev" managed="yes">
-              <mac address="22:52:25:62:e2:aa"/>
-              <source>
-                <address type="pci" domain="0x0000"
-                 bus="0x0a" slot="0x00" function="0x1"/>
-              </source>
-            </interface>""", cfg.to_xml())
-
-    @mock.patch("nova.network.os_vif_util.nova_to_osvif_instance")
-    @mock.patch("nova.network.os_vif_util.nova_to_osvif_vif")
-    def test_config_os_vif_hostdevice_generic(self, mock_convert_vif,
-                                              mock_convert_inst):
-        mock_convert_vif.return_value = self.os_vif_hostdevice_generic
-        mock_convert_inst.return_value = self.os_vif_inst_info
-
-        hostimpl = host.Host("qemu:///system")
-        flavor = objects.Flavor(name='m1.small')
-        image_meta = objects.ImageMeta.from_dict({})
-        d = vif.LibvirtGenericVIFDriver()
-
-        self.assertRaises(exception.InternalError,
-                          d.get_config, self.instance, self.vif_bridge,
-                          image_meta, flavor, CONF.libvirt.virt_type,
-                          hostimpl)

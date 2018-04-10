@@ -29,8 +29,6 @@ class DifferentHostFilter(filters.BaseHostFilter):
     # The hosts the instances are running on doesn't change within a request
     run_filter_once_per_request = True
 
-    RUN_ON_REBUILD = False
-
     def host_passes(self, host_state, spec_obj):
         affinity_uuids = spec_obj.get_scheduler_hint('different_host')
         if affinity_uuids:
@@ -47,8 +45,6 @@ class SameHostFilter(filters.BaseHostFilter):
     # The hosts the instances are running on doesn't change within a request
     run_filter_once_per_request = True
 
-    RUN_ON_REBUILD = False
-
     def host_passes(self, host_state, spec_obj):
         affinity_uuids = spec_obj.get_scheduler_hint('same_host')
         if affinity_uuids:
@@ -62,8 +58,6 @@ class SimpleCIDRAffinityFilter(filters.BaseHostFilter):
     """Schedule the instance on a host with a particular cidr"""
     # The address of a host doesn't change within a request
     run_filter_once_per_request = True
-
-    RUN_ON_REBUILD = False
 
     def host_passes(self, host_state, spec_obj):
         affinity_cidr = spec_obj.get_scheduler_hint('cidr', '/24')
@@ -83,9 +77,6 @@ class _GroupAntiAffinityFilter(filters.BaseHostFilter):
     """Schedule the instance on a different host from a set of group
     hosts.
     """
-
-    RUN_ON_REBUILD = False
-
     def host_passes(self, host_state, spec_obj):
         # Only invoke the filter if 'anti-affinity' is configured
         policies = (spec_obj.instance_group.policies
@@ -119,9 +110,6 @@ class ServerGroupAntiAffinityFilter(_GroupAntiAffinityFilter):
 class _GroupAffinityFilter(filters.BaseHostFilter):
     """Schedule the instance on to host from a set of group hosts.
     """
-
-    RUN_ON_REBUILD = False
-
     def host_passes(self, host_state, spec_obj):
         # Only invoke the filter if 'affinity' is configured
         policies = (spec_obj.instance_group.policies

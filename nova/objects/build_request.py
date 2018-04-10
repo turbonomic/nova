@@ -36,8 +36,7 @@ class BuildRequest(base.NovaObject):
     # Version 1.0: Initial version
     # Version 1.1: Added block_device_mappings
     # Version 1.2: Added save() method
-    # Version 1.3: Added tags
-    VERSION = '1.3'
+    VERSION = '1.2'
 
     fields = {
         'id': fields.IntegerField(),
@@ -50,7 +49,6 @@ class BuildRequest(base.NovaObject):
         # created_at/updated_at. There is no soft delete for this object.
         'created_at': fields.DateTimeField(nullable=True),
         'updated_at': fields.DateTimeField(nullable=True),
-        'tags': fields.ObjectField('TagList'),
     }
 
     def obj_make_compatible(self, primitive, target_version):
@@ -59,8 +57,6 @@ class BuildRequest(base.NovaObject):
         target_version = versionutils.convert_version_to_tuple(target_version)
         if target_version < (1, 1) and 'block_device_mappings' in primitive:
             del primitive['block_device_mappings']
-        elif target_version < (1, 3) and 'tags' in primitive:
-            del primitive['tags']
 
     def _load_instance(self, db_instance):
         # NOTE(alaski): Be very careful with instance loading because it
@@ -108,7 +104,7 @@ class BuildRequest(base.NovaObject):
         # was never persisted.
         self.instance.created_at = self.created_at
         self.instance.updated_at = self.updated_at
-        self.instance.tags = self.tags
+        self.instance.tags = objects.TagList([])
 
     def _load_block_device_mappings(self, db_bdms):
         # 'db_bdms' is a serialized BlockDeviceMappingList object. If it's None
@@ -125,22 +121,6 @@ class BuildRequest(base.NovaObject):
         self.block_device_mappings = (
             objects.BlockDeviceMappingList.obj_from_primitive(
                 jsonutils.loads(db_bdms)))
-
-    def _load_tags(self, db_tags):
-        # 'db_tags' is a serialized TagList object. If it's None
-        # we're in a mixed version nova-api scenario and can't retrieve the
-        # actual list. Set it to an empty list here which will cause a
-        # temporary API inconsistency that will be resolved as soon as the
-        # instance is scheduled and on a compute.
-        if db_tags is None:
-            LOG.debug('Failed to load tags from BuildRequest '
-                      'for instance %s because it is None', self.instance_uuid)
-            self.tags = objects.TagList()
-            return
-
-        self.tags = (
-            objects.TagList.obj_from_primitive(
-                jsonutils.loads(db_tags)))
 
     @staticmethod
     def _from_db_object(context, req, db_req):
@@ -245,8 +225,6 @@ class BuildRequest(base.NovaObject):
         for field in self.instance.obj_fields:
             # NOTE(danms): Don't copy the defaulted tags field
             # as instance.create() won't handle it properly.
-            # TODO(zhengzhenyu): Handle this when the API supports creating
-            # servers with tags.
             if field == 'tags':
                 continue
             if self.instance.obj_attr_is_set(field):
@@ -294,33 +272,6 @@ class BuildRequestList(base.ObjectListBase, base.NovaObject):
                     for k, v in filter_val.items():
                         if (k not in instance.metadata or
                                 v != instance.metadata[k]):
-                            return False
-            elif filter_key in (
-                    'tags', 'tags-any', 'not-tags', 'not-tags-any'):
-                # Get the list of simple string tags first.
-                tags = ([tag.tag for tag in instance.tags]
-                        if instance.tags else [])
-                if filter_key == 'tags':
-                    for item in filter_val:
-                        if item not in tags:
-                            return False
-                elif filter_key == 'tags-any':
-                    found = []
-                    for item in filter_val:
-                        if item in tags:
-                            found.append(item)
-                    if not found:
-                        return False
-                elif filter_key == 'not-tags':
-                    found = []
-                    for item in filter_val:
-                        if item in tags:
-                            found.append(item)
-                    if len(found) == len(filter_val):
-                        return False
-                elif filter_key == 'not-tags-any':
-                    for item in filter_val:
-                        if item in tags:
                             return False
             elif isinstance(filter_val, (list, tuple, set, frozenset)):
                 if not filter_val:
@@ -391,6 +342,8 @@ class BuildRequestList(base.ObjectListBase, base.NovaObject):
         build_requests = cls.get_all(context)
 
         # Fortunately some filters do not apply here.
+        # 'tags' can not be applied at boot time so will not be set for an
+        # instance here.
         # 'changes-since' works off of the updated_at field which has not yet
         # been set at the point in the boot process where build_request still
         # exists. So it can be ignored.
@@ -404,8 +357,7 @@ class BuildRequestList(base.ObjectListBase, base.NovaObject):
         exact_match_filter_names = ['project_id', 'user_id', 'image_ref',
                                     'vm_state', 'instance_type_id', 'uuid',
                                     'metadata', 'host', 'task_state',
-                                    'system_metadata', 'tags', 'tags-any',
-                                    'not-tags', 'not-tags-any']
+                                    'system_metadata']
         exact_filters = {}
         regex_filters = {}
         for key, value in filters.items():
@@ -435,8 +387,7 @@ class BuildRequestList(base.ObjectListBase, base.NovaObject):
 
             filtered_build_reqs.append(build_req)
 
-        if (((len(filtered_build_reqs) < 2) or (not sort_keys))
-                and not marker):
+        if (len(filtered_build_reqs) < 2) or (not sort_keys):
             # No need to sort
             return cls(context, objects=filtered_build_reqs)
 
@@ -449,8 +400,6 @@ class BuildRequestList(base.ObjectListBase, base.NovaObject):
                 if build_req.instance.uuid == marker:
                     marker_index = i
                     break
-            else:
-                raise exception.MarkerNotFound(marker=marker)
         len_build_reqs = len(sorted_build_reqs)
         limit_index = len_build_reqs
         if limit:

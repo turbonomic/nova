@@ -249,11 +249,6 @@ management network.
 Possible values:
 
 * A valid IP address or hostname, else None.
-
-Related options:
-
-* ``live_migration_tunnelled``: The live_migration_inbound_addr value is
-  ignored if tunneling is enabled.
 """),
     cfg.StrOpt('live_migration_uri',
                deprecated_for_removal=True,
@@ -271,26 +266,22 @@ on virt_type). Any included "%s" is replaced with the migration target
 hostname.
 
 If this option is set to None (which is the default), Nova will automatically
-generate the `live_migration_uri` value based on only 4 supported `virt_type`
+generate the `live_migration_uri` value based on only 3 supported `virt_type`
 in following list:
-
 * 'kvm': 'qemu+tcp://%s/system'
 * 'qemu': 'qemu+tcp://%s/system'
 * 'xen': 'xenmigr://%s/system'
-* 'parallels': 'parallels+tcp://%s/system'
 
 Related options:
-
 * ``live_migration_inbound_addr``: If ``live_migration_inbound_addr`` value
-  is not None and ``live_migration_tunnelled`` is False, the ip/hostname
-  address of target compute node is used instead of ``live_migration_uri`` as
-  the uri for live migration.
+  is not None, the ip/hostname address of target compute node is used instead
+  of ``live_migration_uri`` as the uri for live migration.
 * ``live_migration_scheme``: If ``live_migration_uri`` is not set, the scheme
   used for live migration is taken from ``live_migration_scheme`` instead.
 """),
     cfg.StrOpt('live_migration_scheme',
                help="""
-URI scheme used for live migration.
+Schema used for live migration.
 
 Override the default libvirt live migration scheme (which is dependent on
 virt_type). If this option is set to None, nova will automatically choose a
@@ -298,7 +289,6 @@ sensible default based on the hypervisor. It is not recommended that you change
 this unless you are very sure that hypervisor supports a particular scheme.
 
 Related options:
-
 * ``virt_type``: This option is meaningful only when ``virt_type`` is set to
   `kvm` or `qemu`.
 * ``live_migration_uri``: If ``live_migration_uri`` value is not None, the
@@ -315,15 +305,15 @@ VIR_MIGRATE_TUNNELLED migration flag, avoiding the need to configure
 the network to allow direct hypervisor to hypervisor communication.
 If False, use the native transport. If not set, Nova will choose a
 sensible default based on, for example the availability of native
-encryption support in the hypervisor. Enabling this option will definitely
+encryption support in the hypervisor. Enable this option will definitely
 impact performance massively.
 
 Note that this option is NOT compatible with use of block migration.
 
-Related options:
+Possible values:
 
-* ``live_migration_inbound_addr``: The live_migration_inbound_addr value is
-  ignored if tunneling is enabled.
+* Supersedes and (if set) overrides the deprecated 'live_migration_flag' and
+  'block_migration_flag' to enable tunneled migration.
 """),
     cfg.IntOpt('live_migration_bandwidth',
                default=0,
@@ -522,55 +512,8 @@ Related options:
                help='Location where the Xen hvmloader is kept'),
     cfg.ListOpt('disk_cachemodes',
                 default=[],
-                help="""
-Specific cache modes to use for different disk types.
-
-For example: file=directsync,block=none,network=writeback
-
-For local or direct-attached storage, it is recommended that you use
-writethrough (default) mode, as it ensures data integrity and has acceptable
-I/O performance for applications running in the guest, especially for read
-operations. However, caching mode none is recommended for remote NFS storage,
-because direct I/O operations (O_DIRECT) perform better than synchronous I/O
-operations (with O_SYNC). Caching mode none effectively turns all guest I/O
-operations into direct I/O operations on the host, which is the NFS client in
-this environment.
-
-Possible cache modes:
-
-* default: Same as writethrough.
-* none: With caching mode set to none, the host page cache is disabled, but
-  the disk write cache is enabled for the guest. In this mode, the write
-  performance in the guest is optimal because write operations bypass the host
-  page cache and go directly to the disk write cache. If the disk write cache
-  is battery-backed, or if the applications or storage stack in the guest
-  transfer data properly (either through fsync operations or file system
-  barriers), then data integrity can be ensured. However, because the host
-  page cache is disabled, the read performance in the guest would not be as
-  good as in the modes where the host page cache is enabled, such as
-  writethrough mode.
-* writethrough: writethrough mode is the default caching mode. With
-  caching set to writethrough mode, the host page cache is enabled, but the
-  disk write cache is disabled for the guest. Consequently, this caching mode
-  ensures data integrity even if the applications and storage stack in the
-  guest do not transfer data to permanent storage properly (either through
-  fsync operations or file system barriers). Because the host page cache is
-  enabled in this mode, the read performance for applications running in the
-  guest is generally better. However, the write performance might be reduced
-  because the disk write cache is disabled.
-* writeback: With caching set to writeback mode, both the host page cache
-  and the disk write cache are enabled for the guest. Because of this, the
-  I/O performance for applications running in the guest is good, but the data
-  is not protected in a power failure. As a result, this caching mode is
-  recommended only for temporary data where potential data loss is not a
-  concern.
-* directsync: Like "writethrough", but it bypasses the host page cache.
-* unsafe: Caching mode of unsafe ignores cache transfer operations
-  completely. As its name implies, this caching mode should be used only for
-  temporary data where data loss is not a concern. This mode can be useful for
-  speeding up guest installations, but you should switch to another caching
-  mode in production environments.
-"""),
+                help='Specific cachemodes to use for different disk types '
+                     'e.g: file=directsync,block=none'),
     cfg.StrOpt('rng_dev_path',
                help='A path to a device that will be used as source of '
                     'entropy on the host. Permitted options are: '
@@ -769,6 +712,19 @@ libvirt_vif_opts = [
 ]
 
 libvirt_volume_opts = [
+    cfg.ListOpt('qemu_allowed_storage_drivers',
+                default=[],
+                help="""
+Protocols listed here will be accessed directly from QEMU.
+
+If gluster is present in qemu_allowed_storage_drivers, glusterfs's backend will
+pass a disk configuration to QEMU. This allows QEMU to access the volume using
+libgfapi rather than mounting GlusterFS via fuse.
+
+Possible values:
+
+* [gluster]
+"""),
     cfg.BoolOpt('volume_use_multipath',
                 default=False,
                 deprecated_name='iscsi_use_multipath',
@@ -777,13 +733,7 @@ Use multipath connection of the iSCSI or FC volume
 
 Volumes can be connected in the LibVirt as multipath devices. This will
 provide high availability and fault tolerance.
-"""),
-    cfg.IntOpt('num_volume_scan_tries',
-               deprecated_name='num_iscsi_scan_tries',
-               default=5,
-               help="""
-Number of times to scan given storage protocol to find volume.
-"""),
+""")
 ]
 
 libvirt_volume_aoe_opts = [
@@ -798,7 +748,24 @@ attempts that can be made to discover the AoE device.
 """)
 ]
 
+libvirt_volume_glusterfs_opts = [
+    cfg.StrOpt('glusterfs_mount_point_base',
+               default=paths.state_path_def('mnt'),
+               help="""
+Absolute path to the directory where the glusterfs volume is mounted on the
+compute node.
+""")
+]
+
+# TODO(sneti): This config option is also used for other protocols like
+# fibrechannel, scaleio, disco. So this should be renamed to
+# num_volume_scan_tries
 libvirt_volume_iscsi_opts = [
+    cfg.IntOpt('num_iscsi_scan_tries',
+               default=5,
+               help="""
+Number of times to scan iSCSI target to find volume.
+"""),
     cfg.StrOpt('iscsi_iface',
                deprecated_name='iscsi_transport',
                help="""
@@ -896,6 +863,31 @@ Possible values:
                help='Path to a Quobyte Client configuration file.'),
 ]
 
+libvirt_volume_scality_opts = [
+    cfg.StrOpt('scality_sofs_config',
+               help="""
+Path or URL to Scality SOFS(Scale-Out File Server) configuration file.
+
+The Scality SOFS provides OpenStack users the option of storing their
+data on a high capacity, replicated, highly available Scality Ring object
+storage cluster.
+"""),
+    cfg.StrOpt('scality_sofs_mount_point',
+               default='$state_path/scality',
+               help="""
+Base dir where Scality SOFS shall be mounted.
+
+The Scality volume driver in Nova mounts SOFS and lets the hypervisor access
+the volumes.
+
+Possible values:
+
+* $state_path/scality where state_path is a config option that specifies
+  the top-level directory for maintaining nova's state or Any string
+  containing the full directory path.
+"""),
+]
+
 libvirt_volume_smbfs_opts = [
     cfg.StrOpt('smbfs_mount_point_base',
                default=paths.state_path_def('mnt'),
@@ -984,7 +976,7 @@ Related options:
 """
               ),
     cfg.StrOpt('vzstorage_log_path',
-               default='/var/log/vstorage/%(cluster_name)s/nova.log.gz',
+               default='/var/log/pstorage/%(cluster_name)s/nova.log.gz',
                help="""
 Path to vzstorage client log.
 
@@ -1049,11 +1041,13 @@ ALL_OPTS = list(itertools.chain(
     libvirt_vif_opts,
     libvirt_volume_opts,
     libvirt_volume_aoe_opts,
+    libvirt_volume_glusterfs_opts,
     libvirt_volume_iscsi_opts,
     libvirt_volume_iser_opts,
     libvirt_volume_net_opts,
     libvirt_volume_nfs_opts,
     libvirt_volume_quobyte_opts,
+    libvirt_volume_scality_opts,
     libvirt_volume_smbfs_opts,
     libvirt_remotefs_opts,
     libvirt_volume_vzstorage_opts,

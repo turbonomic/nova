@@ -34,7 +34,7 @@ from nova.i18n import _
 
 @jsonschema.FormatChecker.cls_checks('regex')
 def _validate_regex_format(instance):
-    if not instance or not isinstance(instance, six.text_type):
+    if not isinstance(instance, six.text_type):
         return False
     try:
         re.compile(instance)
@@ -110,33 +110,6 @@ def _validate_name_with_leading_trailing_spaces(instance):
 @jsonschema.FormatChecker.cls_checks('name', exception.InvalidName)
 def _validate_name(instance):
     regex = parameter_types.valid_name_regex
-    try:
-        if re.search(regex.regex, instance):
-            return True
-    except TypeError:
-        # The name must be string type. If instance isn't string type, the
-        # TypeError will be raised at here.
-        pass
-    raise exception.InvalidName(reason=regex.reason)
-
-
-@jsonschema.FormatChecker.cls_checks('az_name_with_leading_trailing_spaces',
-                                     exception.InvalidName)
-def _validate_az_name_with_leading_trailing_spaces(instance):
-    regex = parameter_types.valid_az_name_leading_trailing_spaces_regex
-    try:
-        if re.search(regex.regex, instance):
-            return True
-    except TypeError:
-        # The name must be string type. If instance isn't string type, the
-        # TypeError will be raised at here.
-        pass
-    raise exception.InvalidName(reason=regex.reason)
-
-
-@jsonschema.FormatChecker.cls_checks('az_name', exception.InvalidName)
-def _validate_az_name(instance):
-    regex = parameter_types.valid_az_name_regex
     try:
         if re.search(regex.regex, instance):
             return True
@@ -307,23 +280,16 @@ class _SchemaValidator(object):
                     #       message has been written as the similar format of
                     #       WSME.
                     detail = _("Invalid input for field/attribute %(path)s. "
-                               "Value: %(value)s. %(message)s") % {
-                        'path': ex.path.pop(),
-                        'value': ex.instance,
-                        'message': ex.message}
+                               "Value: %(value)s. %(message)s")
                 else:
-                    # NOTE: Use 'ex.path.popleft()' instead of 'ex.path.pop()',
-                    #       due to the structure of query parameters is a dict
-                    #       with key as name and value is list. So the first
-                    #       item in the 'ex.path' is the key, and second item
-                    #       is the index of list in the value. We need the
-                    #       key as the parameter name in the error message.
-                    #       So pop the first value out of 'ex.path'.
                     detail = _("Invalid input for query parameters %(path)s. "
-                               "Value: %(value)s. %(message)s") % {
-                        'path': ex.path.popleft(),
-                        'value': ex.instance,
-                        'message': ex.message}
+                               "Value: %(value)s. %(message)s")
+                # NOTE: For whole OpenStack message consistency, this error
+                #       message has been written as the similar format of WSME.
+                detail = detail % {
+                    'path': ex.path.pop(), 'value': ex.instance,
+                    'message': ex.message
+                }
             else:
                 detail = ex.message
             raise exception.ValidationError(detail=detail)

@@ -22,16 +22,12 @@ POLICY_ROOT = 'os_compute_api:os-migrations:%s'
 
 
 migrations_policies = [
-    policy.DocumentedRuleDefault(
-        POLICY_ROOT % 'index',
-        base.RULE_ADMIN_API,
-        "List migrations",
-        [
-            {
-                'method': 'GET',
-                'path': '/os-migrations'
-            }
-        ]),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'index',
+        check_str=base.RULE_ADMIN_API),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
 ]
 
 

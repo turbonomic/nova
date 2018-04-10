@@ -19,24 +19,16 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:extensions'
+POLICY_ROOT = 'os_compute_api:extensions:%s'
 
 
 extensions_policies = [
-    policy.DocumentedRuleDefault(
-        BASE_POLICY_NAME,
-        base.RULE_ADMIN_OR_OWNER,
-        "List available extensions and show information for an extension "
-        "by alias",
-        [
-            {
-                'method': 'GET',
-                'path': '/extensions'
-            },
-            {
-                'method': 'GET',
-                'path': '/extensions/{alias}'
-            }
-        ]),
+    policy.RuleDefault(
+        name=BASE_POLICY_NAME,
+        check_str=base.RULE_ADMIN_OR_OWNER),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
 ]
 
 

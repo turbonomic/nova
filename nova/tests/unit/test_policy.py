@@ -25,6 +25,7 @@ import requests_mock
 import nova.conf
 from nova import context
 from nova import exception
+from nova.policies import base
 from nova import policy
 from nova import test
 from nova.tests.unit import fake_policy
@@ -72,9 +73,6 @@ class PolicyTestCase(test.NoDBTestCase):
             oslo_policy.RuleDefault("true", '@'),
             oslo_policy.RuleDefault("example:allowed", '@'),
             oslo_policy.RuleDefault("example:denied", "!"),
-            oslo_policy.RuleDefault("old_action_not_default", "@"),
-            oslo_policy.RuleDefault("new_action", "@"),
-            oslo_policy.RuleDefault("old_action_default", "rule:admin_api"),
             oslo_policy.RuleDefault("example:get_http",
                                     "http://www.example.com"),
             oslo_policy.RuleDefault("example:my_file",
@@ -184,32 +182,6 @@ class PolicyTestCase(test.NoDBTestCase):
                 "project_id:%(project_id)s")])
         mock_warning.assert_not_called()
 
-    @mock.patch.object(policy.LOG, 'warning')
-    def test_verify_deprecated_policy_using_old_action(self, mock_warning):
-
-        old_policy = "old_action_not_default"
-        new_policy = "new_action"
-        default_rule = "rule:admin_api"
-
-        using_old_action = policy.verify_deprecated_policy(
-            old_policy, new_policy, default_rule, self.context)
-
-        mock_warning.assert_called_once_with("Start using the new "
-            "action '{0}'. The existing action '{1}' is being deprecated and "
-            "will be removed in future release.".format(new_policy,
-                                                        old_policy))
-        self.assertTrue(using_old_action)
-
-    def test_verify_deprecated_policy_using_new_action(self):
-        old_policy = "old_action_default"
-        new_policy = "new_action"
-        default_rule = "rule:admin_api"
-
-        using_old_action = policy.verify_deprecated_policy(
-            old_policy, new_policy, default_rule, self.context)
-
-        self.assertFalse(using_old_action)
-
 
 class IsAdminCheckTestCase(test.NoDBTestCase):
     def setUp(self):
@@ -264,6 +236,22 @@ class AdminRolePolicyTestCase(test.NoDBTestCase):
                           self.context, action, self.target)
 
 
+class PolicyDocsTestCase(test.NoDBTestCase):
+    def test_create_rule_default(self):
+        rule_default = base.create_rule_default(
+            "name", "check_str", "description goes in here",
+            [{'method': 'GET', 'path': '/test_url'},
+             {'method': 'POST', 'path': '/test_url'}])
+
+        expected = """description goes in here
+GET /test_url
+POST /test_url
+"""
+        self.assertEqual(expected, rule_default.description)
+        self.assertEqual("name", rule_default.name)
+        self.assertEqual("check_str", rule_default.check_str)
+
+
 class RealRolePolicyTestCase(test.NoDBTestCase):
     def setUp(self):
         super(RealRolePolicyTestCase, self).setUp()
@@ -303,6 +291,7 @@ class RealRolePolicyTestCase(test.NoDBTestCase):
 "os_compute_api:os-cells:delete",
 "os_compute_api:os-cells:update",
 "os_compute_api:os-cells:sync_instances",
+"os_compute_api:os-cloudpipe",
 "os_compute_api:os-evacuate",
 "os_compute_api:os-extended-server-attributes",
 "os_compute_api:os-fixed-ips",
@@ -312,8 +301,6 @@ class RealRolePolicyTestCase(test.NoDBTestCase):
 "os_compute_api:os-flavor-extra-specs:update",
 "os_compute_api:os-flavor-extra-specs:delete",
 "os_compute_api:os-flavor-manage",
-"os_compute_api:os-flavor-manage:create",
-"os_compute_api:os-flavor-manage:delete",
 "os_compute_api:os-floating-ips-bulk",
 "os_compute_api:os-floating-ip-dns:domain:delete",
 "os_compute_api:os-floating-ip-dns:domain:update",
@@ -327,8 +314,12 @@ class RealRolePolicyTestCase(test.NoDBTestCase):
 "os_compute_api:os-migrate-server:migrate_live",
 "os_compute_api:os-networks",
 "os_compute_api:os-networks-associate",
+"os_compute_api:os-pci:index",
+"os_compute_api:os-pci:detail",
+"os_compute_api:os-pci:show",
 "os_compute_api:os-quota-sets:update",
 "os_compute_api:os-quota-sets:delete",
+"os_compute_api:os-quota-sets:detail",
 "os_compute_api:os-security-group-default-rules",
 "os_compute_api:os-server-diagnostics",
 "os_compute_api:os-services",
@@ -363,7 +354,6 @@ class RealRolePolicyTestCase(test.NoDBTestCase):
 "os_compute_api:os-pause-server:pause",
 "os_compute_api:os-pause-server:unpause",
 "os_compute_api:os-quota-sets:show",
-"os_compute_api:os-quota-sets:detail",
 "os_compute_api:server-metadata:index",
 "os_compute_api:server-metadata:show",
 "os_compute_api:server-metadata:delete",
@@ -395,6 +385,8 @@ class RealRolePolicyTestCase(test.NoDBTestCase):
 "os_compute_api:os-attach-interfaces",
 "os_compute_api:os-attach-interfaces:create",
 "os_compute_api:os-attach-interfaces:delete",
+"os_compute_api:os-certificates:create",
+"os_compute_api:os-certificates:show",
 "os_compute_api:os-consoles:create",
 "os_compute_api:os-consoles:delete",
 "os_compute_api:os-consoles:index",
@@ -420,6 +412,7 @@ class RealRolePolicyTestCase(test.NoDBTestCase):
 "os_compute_api:limits",
 "os_compute_api:os-multinic",
 "os_compute_api:os-networks:view",
+"os_compute_api:os-pci:pci_servers",
 "os_compute_api:os-rescue",
 "os_compute_api:os-security-groups",
 "os_compute_api:os-server-password",
@@ -451,6 +444,90 @@ class RealRolePolicyTestCase(test.NoDBTestCase):
 
         self.allow_all_rules = (
 "os_compute_api:os-quota-sets:defaults",
+"os_compute_api:extensions:discoverable",
+"os_compute_api:os-admin-actions:discoverable",
+"os_compute_api:os-admin-password:discoverable",
+"os_compute_api:os-aggregates:discoverable",
+"os_compute_api:os-agents:discoverable",
+"os_compute_api:os-attach-interfaces:discoverable",
+"os_compute_api:os-baremetal-nodes:discoverable",
+"os_compute_api:os-block-device-mapping:discoverable",
+"os_compute_api:os-block-device-mapping-v1:discoverable",
+"os_compute_api:os-cells:discoverable",
+"os_compute_api:os-certificates:discoverable",
+"os_compute_api:os-cloudpipe:discoverable",
+"os_compute_api:os-config-drive:discoverable",
+"os_compute_api:os-consoles:discoverable",
+"os_compute_api:os-console-output:discoverable",
+"os_compute_api:os-remote-consoles:discoverable",
+"os_compute_api:os-create-backup:discoverable",
+"os_compute_api:os-deferred-delete:discoverable",
+"os_compute_api:os-evacuate:discoverable",
+"os_compute_api:os-extended-server-attributes:discoverable",
+"os_compute_api:os-extended-status:discoverable",
+"os_compute_api:os-extended-availability-zone:discoverable",
+"os_compute_api:extension_info:discoverable",
+"os_compute_api:os-extended-volumes:discoverable",
+"os_compute_api:os-fixed-ips:discoverable",
+"os_compute_api:os-flavor-access:discoverable",
+"os_compute_api:os-flavor-rxtx:discoverable",
+"os_compute_api:flavors:discoverable",
+"os_compute_api:os-flavor-extra-specs:discoverable",
+"os_compute_api:os-flavor-manage:discoverable",
+"os_compute_api:os-floating-ip-dns:discoverable",
+"os_compute_api:os-floating-ip-pools:discoverable",
+"os_compute_api:os-floating-ips:discoverable",
+"os_compute_api:os-floating-ips-bulk:discoverable",
+"os_compute_api:os-fping:discoverable",
+"os_compute_api:os-hide-server-addresses:discoverable",
+"os_compute_api:os-hosts:discoverable",
+"os_compute_api:os-hypervisors:discoverable",
+"os_compute_api:images:discoverable",
+"os_compute_api:image-metadata:discoverable",
+"os_compute_api:image-size:discoverable",
+"os_compute_api:os-instance-actions:discoverable",
+"os_compute_api:os-instance-usage-audit-log:discoverable",
+"os_compute_api:ips:discoverable",
+"os_compute_api:os-keypairs:discoverable",
+"os_compute_api:limits:discoverable",
+"os_compute_api:os-lock-server:discoverable",
+"os_compute_api:os-migrate-server:discoverable",
+"os_compute_api:os-multinic:discoverable",
+"os_compute_api:os-multiple-create:discoverable",
+"os_compute_api:os-networks:discoverable",
+"os_compute_api:os-networks-associate:discoverable",
+"os_compute_api:os-pause-server:discoverable",
+"os_compute_api:os-pci:discoverable",
+"os_compute_api:os-quota-sets:discoverable",
+"os_compute_api:os-quota-class-sets:discoverable",
+"os_compute_api:os-rescue:discoverable",
+"os_compute_api:os-scheduler-hints:discoverable",
+"os_compute_api:os-security-group-default-rules:discoverable",
+"os_compute_api:os-security-groups:discoverable",
+"os_compute_api:os-server-diagnostics:discoverable",
+"os_compute_api:os-server-password:discoverable",
+"os_compute_api:os-server-usage:discoverable",
+"os_compute_api:os-server-groups:discoverable",
+"os_compute_api:os-server-tags:discoverable",
+"os_compute_api:os-services:discoverable",
+"os_compute_api:server-metadata:discoverable",
+"os_compute_api:server-migrations:discoverable",
+"os_compute_api:servers:discoverable",
+"os_compute_api:os-shelve:discoverable",
+"os_compute_api:os-simple-tenant-usage:discoverable",
+"os_compute_api:os-suspend-server:discoverable",
+"os_compute_api:os-tenant-networks:discoverable",
+"os_compute_api:os-user-data:discoverable",
+"os_compute_api:os-virtual-interfaces:discoverable",
+"os_compute_api:os-volumes:discoverable",
+"os_compute_api:os-volumes-attachments:discoverable",
+"os_compute_api:os-availability-zone:discoverable",
+"os_compute_api:os-used-limits:discoverable",
+"os_compute_api:os-migrations:discoverable",
+"os_compute_api:os-assisted-volume-snapshots:discoverable",
+"os_compute_api:os-console-auth-tokens:discoverable",
+"os_compute_api:os-server-external-events:discoverable",
+"os_compute_api:versions:discoverable",
 )
 
     def test_all_rules_in_sample_file(self):

@@ -5,17 +5,15 @@
     "payload": {
         "nova_object.name": "InstanceActionPayload",
         "nova_object.namespace": "nova",
-        "nova_object.version": "1.5",
+        "nova_object.version": "1.1",
         "nova_object.data": {
             "display_description": "some-server",
             "reservation_id": "r-rqe0mlje",
             "progress": 0,
             "user_id": "fake",
             "task_state": "rebuilding",
-            "auto_disk_config":"MANUAL",
             "node": "fake-mini",
             "created_at": "2012-10-29T13:42:11Z",
-            "key_name": "my-key",
             "kernel_id": "",
             "metadata": {},
             "deleted_at": null,
@@ -67,23 +65,10 @@
             ],
             "tenant_id": "6f70656e737461636b20342065766572",
             "availability_zone": "nova",
-            "block_devices": [{
-                "nova_object.data": {
-                    "boot_index": null,
-                    "delete_on_termination": false,
-                    "device_name": "/dev/sdb",
-                    "tag": null,
-                    "volume_id": "a07f71dc-8151-4e7d-a0cc-cd24a3f11113"
-                },
-                "nova_object.name": "BlockDevicePayload",
-                "nova_object.namespace": "nova",
-                "nova_object.version": "1.0"
-            }],
             "host": "compute",
             "image_uuid": "a2459075-d96c-40d5-893e-577ff92e721c",
             "state": "active",
-            "fault": null,
-            "updated_at": "2012-10-29T13:42:11Z"
+            "fault": null
         }
     }
 }

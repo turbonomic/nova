@@ -34,7 +34,7 @@ class LibvirtFibreChannelVolumeDriver(libvirt_volume.LibvirtBaseVolumeDriver):
         self.connector = connector.InitiatorConnector.factory(
             'FIBRE_CHANNEL', utils.get_root_helper(),
             use_multipath=CONF.libvirt.volume_use_multipath,
-            device_scan_attempts=CONF.libvirt.num_volume_scan_tries)
+            device_scan_attempts=CONF.libvirt.num_iscsi_scan_tries)
 
     def get_config(self, connection_info, disk_info):
         """Returns xml for libvirt."""
@@ -46,7 +46,7 @@ class LibvirtFibreChannelVolumeDriver(libvirt_volume.LibvirtBaseVolumeDriver):
         conf.driver_io = "native"
         return conf
 
-    def connect_volume(self, connection_info, disk_info, instance):
+    def connect_volume(self, connection_info, disk_info):
         """Attach the volume to instance_name."""
 
         LOG.debug("Calling os-brick to attach FC Volume")
@@ -58,7 +58,7 @@ class LibvirtFibreChannelVolumeDriver(libvirt_volume.LibvirtBaseVolumeDriver):
             connection_info['data']['multipath_id'] = \
                 device_info['multipath_id']
 
-    def disconnect_volume(self, connection_info, disk_dev, instance):
+    def disconnect_volume(self, connection_info, disk_dev):
         """Detach the volume from instance_name."""
 
         LOG.debug("calling os-brick to detach FC Volume")
@@ -72,13 +72,4 @@ class LibvirtFibreChannelVolumeDriver(libvirt_volume.LibvirtBaseVolumeDriver):
         LOG.debug("Disconnected FC Volume %s", disk_dev)
 
         super(LibvirtFibreChannelVolumeDriver,
-              self).disconnect_volume(connection_info, disk_dev, instance)
-
-    def extend_volume(self, connection_info, instance):
-        """Extend the volume."""
-        LOG.debug("calling os-brick to extend FC Volume", instance=instance)
-        new_size = self.connector.extend_volume(connection_info['data'])
-        LOG.debug("Extend FC Volume %s; new_size=%s",
-                  connection_info['data']['device_path'],
-                  new_size, instance=instance)
-        return new_size
+              self).disconnect_volume(connection_info, disk_dev)

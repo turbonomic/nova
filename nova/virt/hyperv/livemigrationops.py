@@ -22,8 +22,6 @@ from oslo_log import log as logging
 from oslo_utils import excutils
 
 import nova.conf
-from nova import exception
-from nova.i18n import _
 from nova.objects import migrate_data as migrate_data_obj
 from nova.virt.hyperv import block_device_manager
 from nova.virt.hyperv import imagecache
@@ -131,16 +129,9 @@ class LiveMigrationOps(object):
                   instance=instance_ref)
 
         migrate_data = migrate_data_obj.HyperVLiveMigrateData()
-
-        try:
-            # The remote instance dir might not exist or other issue to cause
-            # OSError in check_remote_instances_dir_shared function
-            migrate_data.is_shared_instance_path = (
-                self._pathutils.check_remote_instances_dir_shared(
-                    instance_ref.host))
-        except exception.FileNotFound as e:
-            reason = _('Unavailable instance location: %s') % e
-            raise exception.MigrationPreCheckError(reason=reason)
+        migrate_data.is_shared_instance_path = (
+            self._pathutils.check_remote_instances_dir_shared(
+                instance_ref.host))
         return migrate_data
 
     def cleanup_live_migration_destination_check(self, ctxt, dest_check_data):
@@ -148,6 +139,5 @@ class LiveMigrationOps(object):
 
     def check_can_live_migrate_source(self, ctxt, instance_ref,
                                       dest_check_data):
-        LOG.debug("check_can_live_migrate_source called",
-                  instance=instance_ref)
+        LOG.debug("check_can_live_migrate_source called", instance_ref)
         return dest_check_data

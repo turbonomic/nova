@@ -19,23 +19,16 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-extended-availability-zone'
+POLICY_ROOT = 'os_compute_api:os-extended-availability-zone:%s'
 
 
 extended_availability_zone_policies = [
-    policy.DocumentedRuleDefault(
-        BASE_POLICY_NAME,
-        base.RULE_ADMIN_OR_OWNER,
-        "Add `OS-EXT-AZ:availability_zone` into the server response",
-        [
-            {
-                'method': 'GET',
-                'path': '/servers/{id}'
-            },
-            {
-                'method': 'GET',
-                'path': '/servers/detail'
-            }
-        ]),
+    policy.RuleDefault(
+        name=BASE_POLICY_NAME,
+        check_str=base.RULE_ADMIN_OR_OWNER),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
 ]
 
 
