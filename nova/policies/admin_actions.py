@@ -18,11 +18,15 @@ from oslo_policy import policy
 from nova.policies import base
 
 
+BASE_POLICY_NAME = 'os_compute_api:os-admin-actions'
 POLICY_ROOT = 'os_compute_api:os-admin-actions:%s'
 
 
 admin_actions_policies = [
-    policy.DocumentedRuleDefault(
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    base.create_rule_default(
         POLICY_ROOT % 'reset_state',
         base.RULE_ADMIN_API,
         "Reset the state of a given server",
@@ -32,7 +36,7 @@ admin_actions_policies = [
                 'path': '/servers/{server_id}/action (os-resetState)'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'inject_network_info',
         base.RULE_ADMIN_API,
         "Inject network information into the server",
@@ -42,7 +46,7 @@ admin_actions_policies = [
                 'path': '/servers/{server_id}/action (injectNetworkInfo)'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'reset_network',
         base.RULE_ADMIN_API,
         "Reset networking on a server",

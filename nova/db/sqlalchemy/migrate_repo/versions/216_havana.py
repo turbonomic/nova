@@ -21,6 +21,8 @@ from sqlalchemy import ForeignKey, Index, Integer, MetaData, String, Table
 from sqlalchemy import Text
 from sqlalchemy.types import NullType
 
+from nova.i18n import _LE
+
 LOG = logging.getLogger(__name__)
 
 
@@ -79,7 +81,7 @@ def _create_shadow_tables(migrate_engine):
             shadow_table.create()
         except Exception:
             LOG.info(repr(shadow_table))
-            LOG.exception('Exception while creating table.')
+            LOG.exception(_LE('Exception while creating table.'))
             raise
 
 
@@ -1073,7 +1075,7 @@ def upgrade(migrate_engine):
             table.create()
         except Exception:
             LOG.info(repr(table))
-            LOG.exception('Exception while creating table.')
+            LOG.exception(_LE('Exception while creating table.'))
             raise
 
     # task log unique constraint

@@ -22,20 +22,23 @@ POLICY_ROOT = 'os_compute_api:os-availability-zone:%s'
 
 
 availability_zone_policies = [
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'list',
         base.RULE_ADMIN_OR_OWNER,
-        "List availability zone information without host information",
+        "Lists availability zone information without host information",
         [
             {
                 'method': 'GET',
                 'path': 'os-availability-zone'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    base.create_rule_default(
         POLICY_ROOT % 'detail',
         base.RULE_ADMIN_API,
-        "List detailed availability zone information with host information",
+        "Lists detailed availability zone information with host information",
         [
             {
                 'method': 'GET',

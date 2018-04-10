@@ -16,7 +16,6 @@
 
 from nova import manager
 from nova.network import driver
-from nova import utils
 
 
 class MetadataManager(manager.Manager):
@@ -27,10 +26,5 @@ class MetadataManager(manager.Manager):
     """
     def __init__(self, *args, **kwargs):
         super(MetadataManager, self).__init__(*args, **kwargs)
-
-        if not utils.is_neutron():
-            # NOTE(mikal): we only add iptables rules if we're running
-            # under nova-network. This code should go away when the
-            # deprecation of nova-network is complete.
-            self.network_driver = driver.load_network_driver()
-            self.network_driver.metadata_accept()
+        self.network_driver = driver.load_network_driver()
+        self.network_driver.metadata_accept()

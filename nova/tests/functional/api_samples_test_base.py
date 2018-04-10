@@ -342,8 +342,7 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
         regexes.update(subs)
         subs = regexes
         self.subs = subs
-        message = response.text if response.status_code >= 400 else None
-        self.assertEqual(exp_code, response.status_code, message)
+        self.assertEqual(exp_code, response.status_code)
         response_data = response.content
         response_data = pretty_data(response_data)
         if not os.path.exists(self._get_template(name,
@@ -373,7 +372,7 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
         except NoMatch as e:
             raise NoMatch("\nFailed to match Template to Response: \n%s\n"
                           "Template: %s\n\n"
-                          "Response: %s\n\n" %
+                          "Respones: %s\n\n" %
                           (e,
                            pp.pformat(template_data),
                            pp.pformat(response_data)))
@@ -396,9 +395,7 @@ class ApiSampleTestBase(integrated_helpers._IntegratedTestBase):
         except NoMatch as e:
             raise NoMatch("\nFailed to match Template to Sample: \n%s\n"
                           "Template: %s\n\n"
-                          "Sample: %s\n\n"
-                          "Hint: does your test need to override "
-                          "ApiSampleTestBase.generalize_subs()?" %
+                          "Sample: %s\n\n" %
                           (e,
                            pp.pformat(template_data),
                            pp.pformat(sample_data)))

@@ -29,9 +29,7 @@ from nova import exception
 from nova.i18n import _, _LE, _LW
 from nova import objects
 from nova.objects import base as obj_base
-from nova.objects import fields
 from nova.objects import instance as obj_instance
-from nova.objects.resource_provider import ResourceClass
 from nova import rpc
 
 
@@ -82,221 +80,6 @@ def build_request_spec(ctxt, image, instances, instance_type=None):
             'instance_type': instance_type,
             'num_instances': len(instances)}
     return jsonutils.to_primitive(request_spec)
-
-
-def _process_extra_specs(extra_specs, resources):
-    """Check the flavor's extra_specs for custom resource information.
-    These will be a dict that is generated from the flavor; and in the
-    flavor, the extra_specs entries will be in the format of either:
-
-        resources:$CUSTOM_RESOURCE_CLASS=$N
-    ...to add a custom resource class to the request, with a positive
-    integer amount of $N
-
-        resources:$STANDARD_RESOURCE_CLASS=0
-    ...to remove that resource class from the request.
-
-        resources:$STANDARD_RESOURCE_CLASS=$N
-    ...to override the flavor's value for that resource class with $N
-    """
-    resource_specs = {key.split("resources:", 1)[-1]: val
-            for key, val in extra_specs.items()
-            if key.startswith("resources:")}
-    resource_keys = set(resource_specs)
-    custom_keys = set([key for key in resource_keys
-            if key.startswith(ResourceClass.CUSTOM_NAMESPACE)])
-    std_keys = resource_keys - custom_keys
-
-    def validate_int(key):
-        val = resource_specs.get(key)
-        try:
-            # Amounts must be integers
-            return int(val)
-        except ValueError:
-            # Not a valid integer
-            LOG.warning("Resource amounts must be integers. Received "
-                    "'%(val)s' for key %(key)s.", {"key": key, "val": val})
-            return None
-
-    for custom_key in custom_keys:
-        custom_val = validate_int(custom_key)
-        if custom_val is not None:
-            if custom_val == 0:
-                # Custom resource values must be positive integers
-                LOG.warning("Resource amounts must be positive integers. "
-                        "Received '%(val)s' for key %(key)s.",
-                        {"key": custom_key, "val": custom_val})
-                continue
-            resources[custom_key] = custom_val
-    for std_key in std_keys:
-        if std_key not in resources:
-            LOG.warning("Received an invalid ResourceClass '%(key)s' in "
-                    "extra_specs.", {"key": std_key})
-            continue
-        val = validate_int(std_key)
-        if val is None:
-            # Received an invalid amount. It's already logged, so move on.
-            continue
-        elif val == 0:
-            resources.pop(std_key, None)
-        else:
-            resources[std_key] = val
-
-
-def resources_from_flavor(instance, flavor):
-    """Convert a flavor into a set of resources for placement, taking into
-    account boot-from-volume instances.
-
-    This takes an instance and a flavor and returns a dict of
-    resource_class:amount based on the attributes of the flavor, accounting for
-    any overrides that are made in extra_specs.
-    """
-    is_bfv = compute_utils.is_volume_backed_instance(instance._context,
-                                                     instance)
-    swap_in_gb = compute_utils.convert_mb_to_ceil_gb(flavor.swap)
-    disk = ((0 if is_bfv else flavor.root_gb) +
-            swap_in_gb + flavor.ephemeral_gb)
-
-    resources = {
-        fields.ResourceClass.VCPU: flavor.vcpus,
-        fields.ResourceClass.MEMORY_MB: flavor.memory_mb,
-        fields.ResourceClass.DISK_GB: disk,
-    }
-    if "extra_specs" in flavor:
-        _process_extra_specs(flavor.extra_specs, resources)
-    return resources
-
-
-def merge_resources(original_resources, new_resources, sign=1):
-    """Merge a list of new resources with existing resources.
-
-    Either add the resources (if sign is 1) or subtract (if sign is -1).
-    If the resulting value is 0 do not include the resource in the results.
-    """
-
-    all_keys = set(original_resources.keys()) | set(new_resources.keys())
-    for key in all_keys:
-        value = (original_resources.get(key, 0) +
-                 (sign * new_resources.get(key, 0)))
-        if value:
-            original_resources[key] = value
-        else:
-            original_resources.pop(key, None)
-
-
-def resources_from_request_spec(spec_obj):
-    """Given a RequestSpec object, returns a dict, keyed by resource class
-    name, of requested amounts of those resources.
-    """
-    resources = {}
-
-    resources[fields.ResourceClass.VCPU] = spec_obj.vcpus
-    resources[fields.ResourceClass.MEMORY_MB] = spec_obj.memory_mb
-
-    requested_disk_mb = (1024 * (spec_obj.root_gb +
-                                 spec_obj.ephemeral_gb) +
-                         spec_obj.swap)
-    # NOTE(sbauza): Disk request is expressed in MB but we count
-    # resources in GB. Since there could be a remainder of the division
-    # by 1024, we need to ceil the result to the next bigger Gb so we
-    # can be sure there would be enough disk space in the destination
-    # to sustain the request.
-    # FIXME(sbauza): All of that could be using math.ceil() but since
-    # we support both py2 and py3, let's fake it until we only support
-    # py3.
-    requested_disk_gb = requested_disk_mb // 1024
-    if requested_disk_mb % 1024 != 0:
-        # Let's ask for a bit more space since we count in GB
-        requested_disk_gb += 1
-    # NOTE(sbauza): Some flavors provide zero size for disk values, we need
-    # to avoid asking for disk usage.
-    if requested_disk_gb != 0:
-        resources[fields.ResourceClass.DISK_GB] = requested_disk_gb
-    if "extra_specs" in spec_obj.flavor:
-        _process_extra_specs(spec_obj.flavor.extra_specs, resources)
-
-    return resources
-
-
-# TODO(mriedem): Remove this when select_destinations() in the scheduler takes
-# some sort of skip_filters flag.
-def claim_resources_on_destination(
-        reportclient, instance, source_node, dest_node):
-    """Copies allocations from source node to dest node in Placement
-
-    Normally the scheduler will allocate resources on a chosen destination
-    node during a move operation like evacuate and live migration. However,
-    because of the ability to force a host and bypass the scheduler, this
-    method can be used to manually copy allocations from the source node to
-    the forced destination node.
-
-    This is only appropriate when the instance flavor on the source node
-    is the same on the destination node, i.e. don't use this for resize.
-
-    :param reportclient: An instance of the SchedulerReportClient.
-    :param instance: The instance being moved.
-    :param source_node: source ComputeNode where the instance currently
-                        lives
-    :param dest_node: destination ComputeNode where the instance is being
-                      moved
-    :raises NoValidHost: If the allocation claim on the destination
-                         node fails.
-    """
-    # Get the current allocations for the source node and the instance.
-    source_node_allocations = reportclient.get_allocations_for_instance(
-        source_node.uuid, instance)
-    if source_node_allocations:
-        # Generate an allocation request for the destination node.
-        alloc_request = {
-            'allocations': [
-                {
-                    'resource_provider': {
-                        'uuid': dest_node.uuid
-                    },
-                    'resources': source_node_allocations
-                }
-            ]
-        }
-        # The claim_resources method will check for existing allocations
-        # for the instance and effectively "double up" the allocations for
-        # both the source and destination node. That's why when requesting
-        # allocations for resources on the destination node before we move,
-        # we use the existing resource allocations from the source node.
-        if reportclient.claim_resources(
-                instance.uuid, alloc_request,
-                instance.project_id, instance.user_id):
-            LOG.debug('Instance allocations successfully created on '
-                      'destination node %(dest)s: %(alloc_request)s',
-                      {'dest': dest_node.uuid,
-                       'alloc_request': alloc_request},
-                      instance=instance)
-        else:
-            # We have to fail even though the user requested that we force
-            # the host. This is because we need Placement to have an
-            # accurate reflection of what's allocated on all nodes so the
-            # scheduler can make accurate decisions about which nodes have
-            # capacity for building an instance. We also cannot rely on the
-            # resource tracker in the compute service automatically healing
-            # the allocations since that code is going away in Queens.
-            reason = (_('Unable to move instance %(instance_uuid)s to '
-                        'host %(host)s. There is not enough capacity on '
-                        'the host for the instance.') %
-                      {'instance_uuid': instance.uuid,
-                       'host': dest_node.host})
-            raise exception.NoValidHost(reason=reason)
-    else:
-        # This shouldn't happen, but it could be a case where there are
-        # older (Ocata) computes still so the existing allocations are
-        # getting overwritten by the update_available_resource periodic
-        # task in the compute service.
-        # TODO(mriedem): Make this an error when the auto-heal
-        # compatibility code in the resource tracker is removed.
-        LOG.warning('No instance allocations found for source node '
-                    '%(source)s in Placement. Not creating allocations '
-                    'for destination node %(dest)s and assuming the '
-                    'compute service will heal the allocations.',
-                    {'source': source_node.uuid, 'dest': dest_node.uuid},
-                    instance=instance)
 
 
 def set_vm_state_and_notify(context, instance_uuid, service, method, updates,
@@ -550,23 +333,25 @@ def _get_group_details(context, instance_uuid, user_group_hosts=None):
                             policies=group.policies, members=group.members)
 
 
-def setup_instance_group(context, request_spec):
+def setup_instance_group(context, request_spec, filter_properties):
     """Add group_hosts and group_policies fields to filter_properties dict
     based on instance uuids provided in request_spec, if those instances are
     belonging to a group.
 
     :param request_spec: Request spec
+    :param filter_properties: Filter properties
     """
-    if request_spec.instance_group and request_spec.instance_group.hosts:
-        group_hosts = request_spec.instance_group.hosts
-    else:
-        group_hosts = None
-    instance_uuid = request_spec.instance_uuid
+    group_hosts = filter_properties.get('group_hosts')
+    # NOTE(sbauza) If there are multiple instance UUIDs, it's a boot
+    # request and they will all be in the same group, so it's safe to
+    # only check the first one.
+    instance_uuid = request_spec.get('instance_properties', {}).get('uuid')
     group_info = _get_group_details(context, instance_uuid, group_hosts)
     if group_info is not None:
-        request_spec.instance_group.hosts = list(group_info.hosts)
-        request_spec.instance_group.policies = group_info.policies
-        request_spec.instance_group.members = group_info.members
+        filter_properties['group_updated'] = True
+        filter_properties['group_hosts'] = group_info.hosts
+        filter_properties['group_policies'] = group_info.policies
+        filter_properties['group_members'] = group_info.members
 
 
 def retry_on_timeout(retries=1):
@@ -598,16 +383,3 @@ def retry_on_timeout(retries=1):
     return outer
 
 retry_select_destinations = retry_on_timeout(CONF.scheduler.max_attempts - 1)
-
-
-def request_is_rebuild(spec_obj):
-    """Returns True if request is for a rebuild.
-
-    :param spec_obj: An objects.RequestSpec to examine (or None).
-    """
-    if not spec_obj:
-        return False
-    if 'scheduler_hints' not in spec_obj:
-        return False
-    check_type = spec_obj.scheduler_hints.get('_nova_check_type')
-    return check_type == ['rebuild']

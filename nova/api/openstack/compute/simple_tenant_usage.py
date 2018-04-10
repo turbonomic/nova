@@ -33,6 +33,7 @@ from nova import objects
 from nova.policies import simple_tenant_usage as stu_policies
 
 CONF = nova.conf.CONF
+ALIAS = "os-simple-tenant-usage"
 
 
 def parse_strtime(dstr, fmt):
@@ -109,11 +110,11 @@ class SimpleTenantUsageController(wsgi.Controller):
         all_instances = []
         cells = objects.CellMappingList.get_all(context)
         for cell in cells:
-            with nova_context.target_cell(context, cell) as cctxt:
+            with nova_context.target_cell(context, cell):
                 try:
                     instances = (
                         objects.InstanceList.get_active_by_window_joined(
-                            cctxt, period_start, period_stop, tenant_id,
+                            context, period_start, period_stop, tenant_id,
                             expected_attrs=['flavor'], limit=limit,
                             marker=marker))
                 except exception.MarkerNotFound:
@@ -363,3 +364,23 @@ class SimpleTenantUsageController(wsgi.Controller):
                 tenant_usage['tenant_usage_links'] = usages_links
 
         return tenant_usage
+
+
+class SimpleTenantUsage(extensions.V21APIExtensionBase):
+    """Simple tenant usage extension."""
+
+    name = "SimpleTenantUsage"
+    alias = ALIAS
+    version = 1
+
+    def get_resources(self):
+        resources = []
+
+        res = extensions.ResourceExtension(ALIAS,
+                                           SimpleTenantUsageController())
+        resources.append(res)
+
+        return resources
+
+    def get_controller_extensions(self):
+        return []

@@ -22,7 +22,7 @@ POLICY_ROOT = 'os_compute_api:os-aggregates:%s'
 
 
 aggregates_policies = [
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'set_metadata',
         base.RULE_ADMIN_API,
         "Create or replace metadata for an aggregate",
@@ -32,17 +32,20 @@ aggregates_policies = [
                 'method': 'POST'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'add_host',
         base.RULE_ADMIN_API,
-        "Add a host to an aggregate",
+        "Add a host to an aggregate.",
         [
             {
                 'path': '/os-aggregates/{aggregate_id}/action (add_host)',
                 'method': 'POST'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    base.create_rule_default(
         POLICY_ROOT % 'create',
         base.RULE_ADMIN_API,
         "Create an aggregate",
@@ -52,7 +55,7 @@ aggregates_policies = [
                 'method': 'POST'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'remove_host',
         base.RULE_ADMIN_API,
         "Remove a host from an aggregate",
@@ -62,7 +65,7 @@ aggregates_policies = [
                 'method': 'POST'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'update',
         base.RULE_ADMIN_API,
         "Update name and/or availability zone for an aggregate",
@@ -72,7 +75,7 @@ aggregates_policies = [
                 'method': 'PUT'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'index',
         base.RULE_ADMIN_API,
         "List all aggregates",
@@ -82,7 +85,7 @@ aggregates_policies = [
                 'method': 'GET'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'delete',
         base.RULE_ADMIN_API,
         "Delete an aggregate",
@@ -92,10 +95,10 @@ aggregates_policies = [
                 'method': 'DELETE'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'show',
         base.RULE_ADMIN_API,
-        "Show details for an aggregate",
+        "Show details for an aggregate.",
         [
             {
                 'path': '/os-aggregates/{aggregate_id}',

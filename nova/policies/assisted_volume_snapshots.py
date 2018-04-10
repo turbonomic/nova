@@ -22,7 +22,7 @@ POLICY_ROOT = 'os_compute_api:os-assisted-volume-snapshots:%s'
 
 
 assisted_volume_snapshots_policies = [
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'create',
         base.RULE_ADMIN_API,
         "Create an assisted volume snapshot",
@@ -32,7 +32,7 @@ assisted_volume_snapshots_policies = [
                 'method': 'POST'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'delete',
         base.RULE_ADMIN_API,
         "Delete an assisted volume snapshot",
@@ -42,6 +42,9 @@ assisted_volume_snapshots_policies = [
                 'method': 'DELETE'
             }
         ]),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
 ]
 
 

@@ -19,15 +19,19 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-used-limits'
+POLICY_ROOT = 'os_compute_api:os-used-limits:%s'
 
 
 used_limits_policies = [
-    # TODO(aunnam): Remove this rule after we separate the scope check from
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    # TODO(aunnam): Remove this rule after we seperate the scope check from
     # policies, as this is only checking the scope.
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         BASE_POLICY_NAME,
         base.RULE_ADMIN_API,
-        """Show rate and absolute limits for the project.
+        """Shows rate and absolute limits for the project.
 
 This policy only checks if the user has access to the requested
 project limits. And this check is performed only after the check

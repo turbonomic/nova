@@ -25,7 +25,17 @@ from nova import quota
 QUOTAS = quota.QUOTAS
 
 
+ALIAS = "os-used-limits"
+
+
 class UsedLimitsController(wsgi.Controller):
+
+    @staticmethod
+    def _reserved(req):
+        try:
+            return int(req.GET['reserved'])
+        except (ValueError, KeyError):
+            return False
 
     @wsgi.extends
     @extensions.expected_errors(())
@@ -54,7 +64,9 @@ class UsedLimitsController(wsgi.Controller):
         used_limits = {}
         for display_name, key in quota_map.items():
             if key in quotas:
-                used_limits[display_name] = quotas[key]['in_use']
+                reserved = (quotas[key]['reserved']
+                            if self._reserved(req) else 0)
+                used_limits[display_name] = quotas[key]['in_use'] + reserved
 
         resp_obj.obj['limits']['absolute'].update(used_limits)
 
@@ -68,3 +80,20 @@ class UsedLimitsController(wsgi.Controller):
             context.can(ul_policies.BASE_POLICY_NAME, target)
             return tenant_id
         return context.project_id
+
+
+class UsedLimits(extensions.V21APIExtensionBase):
+    """Provide data on limited resources that are being used."""
+
+    name = "UsedLimits"
+    alias = ALIAS
+    version = 1
+
+    def get_controller_extensions(self):
+        controller = UsedLimitsController()
+        limits_ext = extensions.ControllerExtension(self, 'limits',
+                                                    controller=controller)
+        return [limits_ext]
+
+    def get_resources(self):
+        return []

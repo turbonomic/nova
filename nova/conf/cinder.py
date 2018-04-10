@@ -106,7 +106,5 @@ def register_opts(conf):
 
 def list_opts():
     return {
-        cinder_group.name: (
-            cinder_opts +
-            ks_loading.get_session_conf_options())
+        cinder_group.name: cinder_opts
     }

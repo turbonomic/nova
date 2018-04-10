@@ -18,8 +18,8 @@ from oslo_config import cfg
 cells_group = cfg.OptGroup('cells',
                             title='Cells Options',
                             help="""
-DEPRECATED: Cells options allow you to use cells v1 functionality in an
-OpenStack deployment.
+Cells options allow you to use cells functionality in openstack
+deployment.
 
 Note that the options in this group are only for cells v1 functionality, which
 is considered experimental and not recommended for new deployments. Cells v1
@@ -29,11 +29,27 @@ required and all Nova deployments will be at least a cells v2 cell of one.
 """)
 
 cells_opts = [
+    cfg.StrOpt('topic',
+        default='cells',
+        deprecated_for_removal=True,
+        deprecated_since='15.0.0',
+        deprecated_reason="""
+Configurable RPC topics provide little value and can result in a wide variety
+of errors. They should not be used.
+""",
+        help="""
+Topic.
+
+This is the message queue topic that cells nodes listen on. It is
+used when the cells service is started up to configure the queue,
+and whenever an RPC call to the scheduler is made.
+
+Possible values:
+
+* cells: This is the recommended and the default value.
+"""),
     cfg.BoolOpt('enable',
         default=False,
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Enable cell v1 functionality.
 
@@ -61,9 +77,6 @@ Related options:
 """),
     cfg.StrOpt('name',
         default='nova',
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Name of the current cell.
 
@@ -78,9 +91,6 @@ Related options:
 """),
     cfg.ListOpt('capabilities',
         default=['hypervisor=xenserver;kvm', 'os=linux;windows'],
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Cell capabilities.
 
@@ -95,9 +105,6 @@ Possible values:
 """),
     cfg.IntOpt('call_timeout',
         default=60,
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         min=0,
         help="""
 Call timeout.
@@ -110,11 +117,9 @@ Possible values:
 
 * An integer, corresponding to the interval time in seconds.
 """),
+    # TODO(sfinucan): Add min parameter
     cfg.FloatOpt('reserve_percent',
         default=10.0,
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Reserve percentage
 
@@ -138,9 +143,6 @@ Possible values:
     cfg.StrOpt('cell_type',
         default='compute',
         choices=('api', 'compute'),
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Type of cell.
 
@@ -154,11 +156,9 @@ Related option:
 * quota_driver: Disable quota checking for the child cells.
   (nova.quota.NoopQuotaDriver)
 """),
+    # TODO(sfinucan): Add min parameter
     cfg.IntOpt('mute_child_interval',
         default=300,
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Mute child interval.
 
@@ -170,11 +170,9 @@ Possible values:
 
 * An integer, corresponding to the interval time in seconds.
 """),
+    # TODO(sfinucan): Add min parameter
     cfg.IntOpt('bandwidth_update_interval',
         default=600,
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Bandwidth update interval.
 
@@ -184,11 +182,9 @@ Possible values:
 
 * An integer, corresponding to the interval time in seconds.
 """),
+    # TODO(sfinucan): Add min parameter
     cfg.IntOpt('instance_update_sync_database_limit',
         default=100,
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Instance update sync database limit.
 
@@ -203,11 +199,9 @@ Possible values:
 ]
 
 mute_weigher_opts = [
+    # TODO(sfinucan): Add max parameter
     cfg.FloatOpt('mute_weight_multiplier',
         default=-10000.0,
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Mute weight multiplier.
 
@@ -222,11 +216,9 @@ Possible values:
 ]
 
 ram_weigher_opts = [
+    # TODO(sfinucan): Add min parameter
     cfg.FloatOpt('ram_weight_multiplier',
         default=10.0,
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Ram weight multiplier.
 
@@ -241,11 +233,9 @@ Possible values:
 ]
 
 weigher_opts = [
+    # TODO(sfinucan): Add min parameter
     cfg.FloatOpt('offset_weight_multiplier',
         default=1.0,
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Offset weight multiplier
 
@@ -262,11 +252,9 @@ Possible values:
 ]
 
 cell_manager_opts = [
+    # TODO(sfinucan): Add min parameter
     cfg.IntOpt('instance_updated_at_threshold',
         default=3600,
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Instance updated at threshold
 
@@ -285,11 +273,9 @@ Related options:
 * This value is used with the ``instance_update_num_instances``
   value in a periodic task run.
 """),
+    # TODO(sfinucan): Add min parameter
     cfg.IntOpt("instance_update_num_instances",
         default=1,
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Instance update num instances
 
@@ -311,11 +297,9 @@ Related options:
 ]
 
 cell_messaging_opts = [
+    # TODO(sfinucan): Add min parameter
     cfg.IntOpt('max_hop_count',
         default=10,
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Maximum hop count
 
@@ -330,9 +314,6 @@ Possible values:
 """),
     cfg.StrOpt('scheduler',
         default='nova.cells.scheduler.CellsScheduler',
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Cells scheduler.
 
@@ -345,9 +326,6 @@ in this option, the CellsScheduler is used.
 cell_rpc_driver_opts = [
     cfg.StrOpt('rpc_driver_queue_base',
         default='cells.intercell',
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 RPC driver queue base.
 
@@ -365,9 +343,6 @@ Possible values:
 cell_scheduler_opts = [
     cfg.ListOpt('scheduler_filter_classes',
         default=['nova.cells.filters.all_filters'],
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Scheduler filter classes.
 
@@ -399,9 +374,6 @@ to a particular cell.
 """),
     cfg.ListOpt('scheduler_weight_classes',
         default=['nova.cells.weights.all_weighers'],
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Scheduler weight classes.
 
@@ -432,11 +404,9 @@ have a lower weight, like if they're full. And when the weight_offset
 is set to a very high value (for example, '999999999999999'), it is
 likely to be picked if another cell do not have a higher weight.
 """),
+    # TODO(sfinucan): Add min parameter
     cfg.IntOpt('scheduler_retries',
         default=10,
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Scheduler retries.
 
@@ -453,11 +423,9 @@ Related options:
 * This value is used with the ``scheduler_retry_delay`` value
   while retrying to find a suitable cell.
 """),
+    # TODO(sfinucan): Add min parameter
     cfg.IntOpt('scheduler_retry_delay',
         default=2,
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Scheduler retry delay.
 
@@ -479,11 +447,9 @@ Related options:
 ]
 
 cell_state_manager_opts = [
+    # TODO(sfinucan): Add min parameter
     cfg.IntOpt('db_check_interval',
         default=60,
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 DB check interval.
 
@@ -498,9 +464,6 @@ Possible values:
 
 """),
     cfg.StrOpt('cells_config',
-        deprecated_for_removal=True,
-        deprecated_since='16.0.0',
-        deprecated_reason='Cells v1 is being replaced with Cells v2.',
         help="""
 Optional cells configuration.
 

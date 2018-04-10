@@ -22,11 +22,14 @@ import errno
 import os
 import re
 
+from lxml import etree
 from oslo_concurrency import processutils
 from oslo_log import log as logging
 
 import nova.conf
 from nova.i18n import _
+from nova.i18n import _LI
+from nova.i18n import _LW
 from nova.objects import fields as obj_fields
 from nova import utils
 from nova.virt.disk import api as disk
@@ -165,7 +168,7 @@ def pick_disk_driver_name(hypervisor_version, is_block_dev=False):
                     else:
                         return "tap"
                 else:
-                    LOG.info("tap-ctl check: %s", out)
+                    LOG.info(_LI("tap-ctl check: %s"), out)
             except OSError as exc:
                 if exc.errno == errno.ENOENT:
                     LOG.debug("tap-ctl tool is not installed")
@@ -277,8 +280,8 @@ def update_mtime(path):
         # the same base image and using shared storage, so log the exception
         # but don't fail. Ideally we'd know if we were on shared storage and
         # would re-raise the error if we are not on shared storage.
-        LOG.warning("Failed to update mtime on path %(path)s. "
-                    "Error: %(error)s",
+        LOG.warning(_LW("Failed to update mtime on path %(path)s. "
+                        "Error: %(error)s"),
                     {'path': path, "error": exc})
 
 
@@ -367,33 +370,38 @@ def path_exists(path):
     return os.path.exists(path)
 
 
-def find_disk(guest):
+def find_disk(virt_dom):
     """Find root device path for instance
 
     May be file or device
     """
-    guest_config = guest.get_config()
+    xml_desc = virt_dom.XMLDesc(0)
+    domain = etree.fromstring(xml_desc)
+    os_type = domain.find('os/type').text
+    driver = None
+    if CONF.libvirt.virt_type == 'lxc':
+        filesystem = domain.find('devices/filesystem')
+        driver = filesystem.find('driver')
 
-    disk_format = None
-    if guest_config.virt_type == 'lxc':
-        filesystem = next(d for d in guest_config.devices
-                          if isinstance(d, vconfig.LibvirtConfigGuestFilesys))
-        disk_path = filesystem.source_dir
+        source = filesystem.find('source')
+        disk_path = source.get('dir')
         disk_path = disk_path[0:disk_path.rfind('rootfs')]
         disk_path = os.path.join(disk_path, 'disk')
-    elif (guest_config.virt_type == 'parallels' and
-          guest_config.os_type == obj_fields.VMMode.EXE):
-        filesystem = next(d for d in guest_config.devices
-                          if isinstance(d, vconfig.LibvirtConfigGuestFilesys))
-        disk_format = filesystem.driver_type
-        disk_path = filesystem.source_file
+    elif (CONF.libvirt.virt_type == 'parallels' and
+          os_type == obj_fields.VMMode.EXE):
+        filesystem = domain.find('devices/filesystem')
+        driver = filesystem.find('driver')
+
+        source = filesystem.find('source')
+        disk_path = source.get('file')
     else:
-        disk = next(d for d in guest_config.devices
-                    if isinstance(d, vconfig.LibvirtConfigGuestDisk))
-        disk_format = disk.driver_format
-        disk_path = disk.source_path if disk.source_type != 'mount' else None
-        if not disk_path and disk.source_protocol == 'rbd':
-            disk_path = disk.source_name
+        disk = domain.find('devices/disk')
+        driver = disk.find('driver')
+
+        source = disk.find('source')
+        disk_path = source.get('file') or source.get('dev')
+        if not disk_path and CONF.libvirt.images_type == 'rbd':
+            disk_path = source.get('name')
             if disk_path:
                 disk_path = 'rbd:' + disk_path
 
@@ -401,11 +409,15 @@ def find_disk(guest):
         raise RuntimeError(_("Can't retrieve root device path "
                              "from instance libvirt configuration"))
 
-    # This is a legacy quirk of libvirt/xen. Everything else should
-    # report the on-disk format in type.
-    if disk_format == 'aio':
-        disk_format = 'raw'
-    return (disk_path, disk_format)
+    if driver is not None:
+        format = driver.get('type')
+        # This is a legacy quirk of libvirt/xen. Everything else should
+        # report the on-disk format in type.
+        if format == 'aio':
+            format = 'raw'
+    else:
+        format = None
+    return (disk_path, format)
 
 
 def get_disk_type_from_path(path):
@@ -532,27 +544,3 @@ def is_mounted(mount_path, source=None):
 
 def is_valid_hostname(hostname):
     return re.match(r"^[\w\-\.:]+$", hostname)
-
-
-def last_bytes(file_like_object, num):
-    """Return num bytes from the end of the file, and remaining byte count.
-
-    :param file_like_object: The file to read
-    :param num: The number of bytes to return
-
-    :returns: (data, remaining)
-    """
-
-    try:
-        file_like_object.seek(-num, os.SEEK_END)
-    except IOError as e:
-        # seek() fails with EINVAL when trying to go before the start of
-        # the file. It means that num is larger than the file size, so
-        # just go to the start.
-        if e.errno == errno.EINVAL:
-            file_like_object.seek(0, os.SEEK_SET)
-        else:
-            raise
-
-    remaining = file_like_object.tell()
-    return (file_like_object.read(), remaining)

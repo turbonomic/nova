@@ -23,11 +23,11 @@ POLICY_ROOT = 'os_compute_api:os-attach-interfaces:%s'
 
 
 attach_interfaces_policies = [
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         BASE_POLICY_NAME,
         base.RULE_ADMIN_OR_OWNER,
-        "List port interfaces or show details of a port interface attached "
-        "to a server",
+        "List port interfaces or show details of a port \
+interface attached to a server",
         [
             {
                 'method': 'GET',
@@ -38,20 +38,23 @@ attach_interfaces_policies = [
                 'path': '/servers/{server_id}/os-interface/{port_id}'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    base.create_rule_default(
         POLICY_ROOT % 'create',
         base.RULE_ADMIN_OR_OWNER,
-        "Attach an interface to a server",
+        'Attach an interface to a server',
         [
             {
                 'method': 'POST',
                 'path': '/servers/{server_id}/os-interface'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'delete',
         base.RULE_ADMIN_OR_OWNER,
-        "Detach an interface from a server",
+        'Detach an interface from a server',
         [
             {
                 'method': 'DELETE',

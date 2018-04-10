@@ -19,13 +19,15 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-tenant-networks'
+POLICY_ROOT = 'os_compute_api:os-tenant-networks:%s'
 
 
 tenant_networks_policies = [
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         BASE_POLICY_NAME,
         base.RULE_ADMIN_OR_OWNER,
-        """Create, list, show information for, and delete project networks.
+        """Creates, lists, shows information for, and deletes
+project networks.
 
 These APIs are proxy calls to the Network service. These are all
 deprecated.""",
@@ -51,6 +53,9 @@ deprecated.""",
             }
 
         ]),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
 ]
 
 

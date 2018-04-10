@@ -12,8 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import copy
-
 from nova.api.validation import parameter_types
 
 
@@ -46,7 +44,3 @@ create = {
     },
     'additionalProperties': False,
 }
-
-create_v249 = copy.deepcopy(create)
-create_v249['properties']['interfaceAttachment'][
-            'properties']['tag'] = parameter_types.tag

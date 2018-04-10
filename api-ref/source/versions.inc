@@ -44,12 +44,15 @@ Response
 
   - versions: versions
   - id: version_id
-  - links: links
-  - min_version: version_min
   - status: version_status
-  - updated: updated_version
+  - links: links
   - version: version_max
+  - min_version: version_min
 
+.. note::
+
+   The ``updated`` parameter in the response is vestigial and provides
+   no useful information.
 
 Response Example
 ----------------
@@ -91,12 +94,16 @@ Response
 
   - version: version
   - id: version_id
-  - links: links
-  - media-types: media_types
-  - min_version: version_min
   - status: version_status
-  - updated: updated_version
+  - links: links
   - version: version_max
+  - min_version: version_min
+
+.. note::
+
+   The ``updated`` and ``media-types`` parameters in the response are
+   vestigial and provide no useful information. They will probably be
+   deprecated and removed in the future.
 
 
 Response Example

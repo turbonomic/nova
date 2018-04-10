@@ -23,35 +23,15 @@ POLICY_ROOT = 'os_compute_api:os-instance-actions:%s'
 
 
 instance_actions_policies = [
-    policy.DocumentedRuleDefault(
-        POLICY_ROOT % 'events',
-        base.RULE_ADMIN_API,
-        """Add events details in action details for a server.
-
-This check is performed only after the check
-os_compute_api:os-instance-actions passes. Beginning with
-Microversion 2.51, events details are always included; traceback
-information is provided per event if policy enforcement passes.""",
-        [
-            {
-                'method': 'GET',
-                'path': '/servers/{server_id}/os-instance-actions/{request_id}'
-            }
-        ]),
-    policy.DocumentedRuleDefault(
-        BASE_POLICY_NAME,
-        base.RULE_ADMIN_OR_OWNER,
-        """List actions and show action details for a server.""",
-        [
-            {
-                'method': 'GET',
-                'path': '/servers/{server_id}/os-instance-actions'
-            },
-            {
-                'method': 'GET',
-                'path': '/servers/{server_id}/os-instance-actions/{request_id}'
-            }
-        ]),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'events',
+        check_str=base.RULE_ADMIN_API),
+    policy.RuleDefault(
+        name=BASE_POLICY_NAME,
+        check_str=base.RULE_ADMIN_OR_OWNER),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
 ]
 
 

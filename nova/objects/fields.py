@@ -15,7 +15,6 @@
 import os
 import re
 
-from cursive import signature_utils
 from oslo_versionedobjects import fields
 import six
 
@@ -66,7 +65,6 @@ AutoTypedField = fields.AutoTypedField
 BaseEnumField = fields.BaseEnumField
 MACAddressField = fields.MACAddressField
 ListOfIntegersField = fields.ListOfIntegersField
-PCIAddressField = fields.PCIAddressField
 
 
 # NOTE(danms): These are things we need to import for some of our
@@ -334,18 +332,6 @@ class DiskBus(BaseNovaEnum):
     ALL = (FDC, IDE, SATA, SCSI, USB, VIRTIO, XEN, LXC, UML)
 
 
-class DiskConfig(BaseNovaEnum):
-
-    MANUAL = "MANUAL"
-    AUTO = "AUTO"
-
-    ALL = (MANUAL, AUTO)
-
-    def coerce(self, obj, attr, value):
-        enum_value = DiskConfig.AUTO if value else DiskConfig.MANUAL
-        return super(DiskConfig, self).coerce(obj, attr, enum_value)
-
-
 class FirmwareType(BaseNovaEnum):
 
     UEFI = "uefi"
@@ -434,15 +420,14 @@ class HVType(BaseNovaEnum):
 
 class ImageSignatureHashType(BaseNovaEnum):
     # Represents the possible hash methods used for image signing
-    ALL = tuple(sorted(signature_utils.HASH_METHODS.keys()))
+    ALL = ('SHA-224', 'SHA-256', 'SHA-384', 'SHA-512')
 
 
 class ImageSignatureKeyType(BaseNovaEnum):
     # Represents the possible keypair types used for image signing
-    ALL = (
-        'DSA', 'ECC_SECP384R1', 'ECC_SECP521R1', 'ECC_SECT409K1',
-        'ECC_SECT409R1', 'ECC_SECT571K1', 'ECC_SECT571R1', 'RSA-PSS'
-    )
+    ALL = ('DSA', 'ECC_SECT571K1', 'ECC_SECT409K1', 'ECC_SECT571R1',
+           'ECC_SECT409R1', 'ECC_SECP521R1', 'ECC_SECP384R1', 'RSA-PSS'
+           )
 
 
 class OSType(BaseNovaEnum):
@@ -743,16 +728,6 @@ class DiskFormat(BaseNovaEnum):
     ALL = (RBD, LVM, QCOW2, RAW, PLOOP, VHD, VMDK, VDI, ISO)
 
 
-class HypervisorDriver(BaseNovaEnum):
-    LIBVIRT = "libvirt"
-    XENAPI = "xenapi"
-    VMWAREAPI = "vmwareapi"
-    IRONIC = "ironic"
-    HYPERV = "hyperv"
-
-    ALL = (LIBVIRT, XENAPI, VMWAREAPI, IRONIC, HYPERV)
-
-
 class PointerModelType(BaseNovaEnum):
 
     USBTABLET = "usbtablet"
@@ -1001,6 +976,14 @@ class AddressBase(FieldType):
         return {'type': ['string'], 'pattern': self.PATTERN}
 
 
+class PCIAddress(AddressBase):
+    PATTERN = '[a-f0-9]{4}:[a-f0-9]{2}:[a-f0-9]{2}.[a-f0-9]'
+
+    @staticmethod
+    def coerce(obj, attr, value):
+        return AddressBase.coerce(PCIAddress, attr, value)
+
+
 class USBAddress(AddressBase):
     PATTERN = '[a-f0-9]+:[a-f0-9]+'
 
@@ -1025,12 +1008,8 @@ class IDEAddress(AddressBase):
         return AddressBase.coerce(IDEAddress, attr, value)
 
 
-class XenAddress(AddressBase):
-    PATTERN = '(00[0-9]{2}00)|[1-9][0-9]+'
-
-    @staticmethod
-    def coerce(obj, attr, value):
-        return AddressBase.coerce(XenAddress, attr, value)
+class PCIAddressField(AutoTypedField):
+    AUTO_TYPE = PCIAddress()
 
 
 class USBAddressField(AutoTypedField):
@@ -1043,10 +1022,6 @@ class SCSIAddressField(AutoTypedField):
 
 class IDEAddressField(AutoTypedField):
     AUTO_TYPE = IDEAddress()
-
-
-class XenAddressField(AutoTypedField):
-    AUTO_TYPE = XenAddress()
 
 
 class ArchitectureField(BaseEnumField):
@@ -1095,10 +1070,6 @@ class CPUFeaturePolicyField(BaseEnumField):
 
 class DiskBusField(BaseEnumField):
     AUTO_TYPE = DiskBus()
-
-
-class DiskConfigField(BaseEnumField):
-    AUTO_TYPE = DiskConfig()
 
 
 class FirmwareTypeField(BaseEnumField):
@@ -1167,10 +1138,6 @@ class PciDeviceTypeField(BaseEnumField):
 
 class DiskFormatField(BaseEnumField):
     AUTO_TYPE = DiskFormat()
-
-
-class HypervisorDriverField(BaseEnumField):
-    AUTO_TYPE = HypervisorDriver()
 
 
 class PointerModelField(BaseEnumField):

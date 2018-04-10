@@ -35,6 +35,7 @@ import nova.conf
 from nova import context
 from nova.db import base
 from nova import exception
+from nova.i18n import _LE
 from nova import objects
 from nova import rpc
 from nova import servicegroup
@@ -164,7 +165,7 @@ class CellStateManager(base.Base):
                 attempts += 1
                 if attempts > 120:
                     raise
-                LOG.exception('DB error')
+                LOG.exception(_LE('DB error'))
                 time.sleep(30)
 
         my_cell_capabs = {}
@@ -362,8 +363,8 @@ class CellStateManager(base.Base):
         cell = (self.child_cells.get(cell_name) or
                 self.parent_cells.get(cell_name))
         if not cell:
-            LOG.error("Unknown cell '%(cell_name)s' when trying to "
-                      "update capabilities",
+            LOG.error(_LE("Unknown cell '%(cell_name)s' when trying to "
+                          "update capabilities"),
                       {'cell_name': cell_name})
             return
         # Make sure capabilities are sets.
@@ -377,8 +378,8 @@ class CellStateManager(base.Base):
         cell = (self.child_cells.get(cell_name) or
                 self.parent_cells.get(cell_name))
         if not cell:
-            LOG.error("Unknown cell '%(cell_name)s' when trying to "
-                      "update capacities",
+            LOG.error(_LE("Unknown cell '%(cell_name)s' when trying to "
+                          "update capacities"),
                       {'cell_name': cell_name})
             return
         cell.update_capacities(capacities)

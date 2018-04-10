@@ -26,6 +26,9 @@ from nova.i18n import _
 from nova.policies import servers_migrations as sm_policies
 
 
+ALIAS = 'servers:migrations'
+
+
 def output(migration):
     """Returns the desired output of the API from an object.
 
@@ -150,3 +153,22 @@ class ServerMigrationsController(wsgi.Controller):
             raise exc.HTTPNotFound(explanation=e.format_message())
         except exception.InvalidMigrationState as e:
             raise exc.HTTPBadRequest(explanation=e.format_message())
+
+
+class ServerMigrations(extensions.V21APIExtensionBase):
+    """Server Migrations API."""
+    name = "ServerMigrations"
+    alias = 'server-migrations'
+    version = 1
+
+    def get_resources(self):
+        parent = {'member_name': 'server',
+                  'collection_name': 'servers'}
+        member_actions = {'action': 'POST'}
+        resources = [extensions.ResourceExtension(
+            'migrations', ServerMigrationsController(),
+            parent=parent, member_actions=member_actions)]
+        return resources
+
+    def get_controller_extensions(self):
+        return []

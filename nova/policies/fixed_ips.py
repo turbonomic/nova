@@ -19,29 +19,16 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-fixed-ips'
+POLICY_ROOT = 'os_compute_api:os-fixed-ips:%s'
 
 
 fixed_ips_policies = [
-    policy.DocumentedRuleDefault(
-        BASE_POLICY_NAME,
-        base.RULE_ADMIN_API,
-        """Show details for, reserve and unreserve a fixed IP address.
-
-These APIs are only available with nova-network which is deprecated.""",
-        [
-            {
-                'method': 'GET',
-                'path': '/os-fixed-ips/{fixed_ip}'
-            },
-            {
-                'method': 'POST',
-                'path': '/os-fixed-ips/{fixed_ip}/action (reserve)'
-            },
-            {
-                'method': 'POST',
-                'path': '/os-fixed-ips/{fixed_ip}/action (unreserve)'
-            }
-        ]),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    policy.RuleDefault(
+        name=BASE_POLICY_NAME,
+        check_str=base.RULE_ADMIN_API),
 ]
 
 

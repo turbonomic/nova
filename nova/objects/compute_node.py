@@ -48,9 +48,7 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject):
     # Version 1.14: Added cpu_allocation_ratio and ram_allocation_ratio
     # Version 1.15: Added uuid
     # Version 1.16: Added disk_allocation_ratio
-    # Version 1.17: Added mapped
-    # Version 1.18: Added get_by_uuid().
-    VERSION = '1.18'
+    VERSION = '1.16'
 
     fields = {
         'id': fields.IntegerField(read_only=True),
@@ -91,15 +89,11 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject):
         'cpu_allocation_ratio': fields.FloatField(),
         'ram_allocation_ratio': fields.FloatField(),
         'disk_allocation_ratio': fields.FloatField(),
-        'mapped': fields.IntegerField(),
         }
 
     def obj_make_compatible(self, primitive, target_version):
         super(ComputeNode, self).obj_make_compatible(primitive, target_version)
         target_version = versionutils.convert_version_to_tuple(target_version)
-        if target_version < (1, 17):
-            if 'mapped' in primitive:
-                del primitive['mapped']
         if target_version < (1, 16):
             if 'disk_allocation_ratio' in primitive:
                 del primitive['disk_allocation_ratio']
@@ -205,9 +199,6 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject):
                     if value == 0.0 and key == 'disk_allocation_ratio':
                         # It's not specified either on the controller
                         value = 1.0
-            elif key == 'mapped':
-                value = 0 if value is None else value
-
             setattr(compute, key, value)
 
         stats = db_compute['stats']
@@ -239,14 +230,6 @@ class ComputeNode(base.NovaPersistentObject, base.NovaObject):
     def get_by_id(cls, context, compute_id):
         db_compute = db.compute_node_get(context, compute_id)
         return cls._from_db_object(context, cls(), db_compute)
-
-    @base.remotable_classmethod
-    def get_by_uuid(cls, context, compute_uuid):
-        nodes = ComputeNodeList.get_all_by_uuids(context, [compute_uuid])
-        # We have a unique index on the uuid column so we can get back 0 or 1.
-        if not nodes:
-            raise exception.ComputeHostNotFound(host=compute_uuid)
-        return nodes[0]
 
     # NOTE(hanlind): This is deprecated and should be removed on the next
     # major version bump
@@ -378,8 +361,7 @@ class ComputeNodeList(base.ObjectListBase, base.NovaObject):
     # Version 1.14 ComputeNode version 1.14
     # Version 1.15 Added get_by_pagination()
     # Version 1.16: Added get_all_by_uuids()
-    # Version 1.17: Added get_all_by_not_mapped()
-    VERSION = '1.17'
+    VERSION = '1.16'
     fields = {
         'objects': fields.ListOfObjectsField('ComputeNode'),
         }
@@ -387,14 +369,6 @@ class ComputeNodeList(base.ObjectListBase, base.NovaObject):
     @base.remotable_classmethod
     def get_all(cls, context):
         db_computes = db.compute_node_get_all(context)
-        return base.obj_make_list(context, cls(context), objects.ComputeNode,
-                                  db_computes)
-
-    @base.remotable_classmethod
-    def get_all_by_not_mapped(cls, context, mapped_less_than):
-        """Return ComputeNode records that are not mapped at a certain level"""
-        db_computes = db.compute_node_get_all_mapped_less_than(
-            context, mapped_less_than)
         return base.obj_make_list(context, cls(context), objects.ComputeNode,
                                   db_computes)
 
@@ -449,18 +423,5 @@ class ComputeNodeList(base.ObjectListBase, base.NovaObject):
     def get_all_by_uuids(cls, context, compute_uuids):
         db_computes = cls._db_compute_node_get_all_by_uuids(context,
                                                             compute_uuids)
-        return base.obj_make_list(context, cls(context), objects.ComputeNode,
-                                  db_computes)
-
-    @staticmethod
-    @db.select_db_reader_mode
-    def _db_compute_node_get_by_hv_type(context, hv_type):
-        db_computes = context.session.query(models.ComputeNode).filter(
-            models.ComputeNode.hypervisor_type == hv_type).all()
-        return db_computes
-
-    @classmethod
-    def get_by_hypervisor_type(cls, context, hv_type):
-        db_computes = cls._db_compute_node_get_by_hv_type(context, hv_type)
         return base.obj_make_list(context, cls(context), objects.ComputeNode,
                                   db_computes)

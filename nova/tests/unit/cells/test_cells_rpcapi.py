@@ -16,7 +16,6 @@
 Tests For Cells RPCAPI
 """
 
-import mock
 import six
 
 from nova.cells import rpcapi as cells_rpcapi
@@ -35,9 +34,9 @@ class CellsAPITestCase(test.NoDBTestCase):
 
     def setUp(self):
         super(CellsAPITestCase, self).setUp()
-        self.fake_topic = 'cells'
+        self.fake_topic = 'fake_topic'
         self.fake_context = 'fake_context'
-        self.flags(enable=True, group='cells')
+        self.flags(topic=self.fake_topic, enable=True, group='cells')
         self.cells_rpcapi = cells_rpcapi.CellsAPI()
 
     def _stub_rpc_method(self, rpc_method, result):
@@ -318,10 +317,11 @@ class CellsAPITestCase(test.NoDBTestCase):
         call_info = self._stub_rpc_method('call', 'fake_response')
         result = self.cells_rpcapi.proxy_rpc_to_manager(
                 self.fake_context, rpc_message='fake-msg',
-                topic='fake-topic', call=True)
+                topic='fake-topic', call=True, timeout=-1)
         expected_args = {'rpc_message': 'fake-msg',
                          'topic': 'fake-topic',
-                         'call': True}
+                         'call': True,
+                         'timeout': -1}
         self._check_result(call_info, 'proxy_rpc_to_manager',
                            expected_args,
                            version='1.2')
@@ -371,29 +371,6 @@ class CellsAPITestCase(test.NoDBTestCase):
         self._check_result(call_info, 'compute_node_get',
                            expected_args, version='1.4')
         self.assertEqual('fake_response', result)
-
-    def test_compute_node_get_too_old(self):
-        """Tests that ComputeHostNotFound is raised if passed a compute node
-        uuid but we can't send it on the 1.38 version.
-        """
-        with mock.patch.object(self.cells_rpcapi.client, 'can_send_version',
-                               return_value=False) as can_send_version_mock:
-            self.assertRaises(exception.ComputeHostNotFound,
-                              self.cells_rpcapi.compute_node_get,
-                              self.fake_context, uuids.compute_id)
-        can_send_version_mock.assert_called_once_with('1.38')
-
-    def test_compute_node_get_with_uuid(self):
-        """Tests that we send a message at 1.38 if the compute node uuid is
-        passed in and the version check passes.
-        """
-        fake_compute_node = objects.ComputeNode(uuid=uuids.compute_id)
-        call_info = self._stub_rpc_method('call', fake_compute_node)
-        self.assertEqual(fake_compute_node,
-                         self.cells_rpcapi.compute_node_get(
-                             self.fake_context, uuids.compute_id))
-        args = dict(compute_id=uuids.compute_id)
-        self._check_result(call_info, 'compute_node_get', args, version='1.38')
 
     def test_actions_get(self):
         fake_instance = {'uuid': uuids.instance, 'cell_name': 'region!child'}

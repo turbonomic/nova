@@ -32,6 +32,8 @@ from oslo_utils import units
 
 from nova import exception
 from nova.i18n import _
+from nova.i18n import _LE
+from nova.i18n import _LW
 from nova import utils
 from nova.virt.libvirt import utils as libvirt_utils
 
@@ -76,7 +78,7 @@ class RBDVolumeProxy(object):
                 driver._disconnect_from_rados(client, ioctx)
         except rbd.Error:
             with excutils.save_and_reraise_exception():
-                LOG.exception(_("error opening rbd image %s"), name)
+                LOG.exception(_LE("error opening rbd image %s"), name)
                 driver._disconnect_from_rados(client, ioctx)
 
         self.driver = driver
@@ -133,11 +135,7 @@ class RBDDriver(object):
         try:
             client.connect()
             pool_to_open = pool or self.pool
-            # NOTE(luogangyi): open_ioctx >= 10.1.0 could handle unicode
-            # arguments perfectly as part of Python 3 support.
-            # Therefore, when we turn to Python 3, it's safe to remove
-            # str() conversion.
-            ioctx = client.open_ioctx(str(pool_to_open))
+            ioctx = client.open_ioctx(pool_to_open)
             return client, ioctx
         except rados.Error:
             # shutdown cannot raise an exception
@@ -304,13 +302,13 @@ class RBDDriver(object):
             try:
                 RbdProxy().remove(client.ioctx, name)
             except rbd.ImageNotFound:
-                LOG.warning('image %(volume)s in pool %(pool)s can not be '
-                            'found, failed to remove',
+                LOG.warning(_LW('image %(volume)s in pool %(pool)s can not be '
+                             'found, failed to remove'),
                             {'volume': name, 'pool': self.pool})
             except rbd.ImageHasSnapshots:
-                LOG.error('image %(volume)s in pool %(pool)s has '
-                          'snapshots, failed to remove',
-                          {'volume': name, 'pool': self.pool})
+                LOG.error(_LE('image %(volume)s in pool %(pool)s has '
+                              'snapshots, failed to remove'),
+                            {'volume': name, 'pool': self.pool})
 
     def import_image(self, base, name):
         """Import RBD volume from image file.
@@ -340,8 +338,9 @@ class RBDDriver(object):
                 self.remove_snap(volume, libvirt_utils.RESIZE_SNAPSHOT_NAME,
                                  ignore_errors=True)
             except (rbd.ImageBusy, rbd.ImageHasSnapshots):
-                LOG.warning('rbd remove %(volume)s in pool %(pool)s failed',
-                            {'volume': volume, 'pool': self.pool})
+                LOG.warning(_LW('rbd remove %(volume)s in pool %(pool)s '
+                             'failed'),
+                         {'volume': volume, 'pool': self.pool})
             retryctx['retries'] -= 1
             if retryctx['retries'] <= 0:
                 raise loopingcall.LoopingCallDone()
@@ -403,16 +402,17 @@ class RBDDriver(object):
                     if force:
                         vol.unprotect_snap(name)
                     elif not ignore_errors:
-                        LOG.warning('snapshot(%(name)s) on rbd '
-                                    'image(%(img)s) is protected, skipping',
+                        LOG.warning(_LW('snapshot(%(name)s) on rbd '
+                                        'image(%(img)s) is protected, '
+                                        'skipping'),
                                     {'name': name, 'img': volume})
                         return
                 LOG.debug('removing snapshot(%(name)s) on rbd image(%(img)s)',
                           {'name': name, 'img': volume})
                 vol.remove_snap(name)
             elif not ignore_errors:
-                LOG.warning('no snapshot(%(name)s) found on rbd '
-                            'image(%(img)s)',
+                LOG.warning(_LW('no snapshot(%(name)s) found on rbd '
+                                'image(%(img)s)'),
                             {'name': name, 'img': volume})
 
     def rollback_to_snap(self, volume, name):

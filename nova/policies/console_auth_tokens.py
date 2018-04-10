@@ -19,14 +19,18 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-console-auth-tokens'
+POLICY_ROOT = 'os_compute_api:os-console-auth-tokens:%s'
 
 
 console_auth_tokens_policies = [
-    policy.DocumentedRuleDefault(
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    base.create_rule_default(
         BASE_POLICY_NAME,
         base.RULE_ADMIN_API,
-        "Show console connection information for a given console "
-        "authentication token",
+        'Show console connection information for a given console \
+authentication token',
         [
             {
                 'method': 'GET',

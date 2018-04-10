@@ -19,30 +19,16 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-extended-status'
+POLICY_ROOT = 'os_compute_api:os-extended-status:%s'
 
 
 extended_status_policies = [
-    policy.DocumentedRuleDefault(
-        BASE_POLICY_NAME,
-        base.RULE_ADMIN_OR_OWNER,
-        """Return extended status in the response of server.
-
-This policy will control the visibility for a set of attributes:
-
-- ``OS-EXT-STS:task_state``
-- ``OS-EXT-STS:vm_state``
-- ``OS-EXT-STS:power_state``
-""",
-        [
-            {
-                'method': 'GET',
-                'path': '/servers/{id}'
-            },
-            {
-                'method': 'GET',
-                'path': '/servers/detail'
-            }
-        ]),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    policy.RuleDefault(
+        name=BASE_POLICY_NAME,
+        check_str=base.RULE_ADMIN_OR_OWNER),
 ]
 
 

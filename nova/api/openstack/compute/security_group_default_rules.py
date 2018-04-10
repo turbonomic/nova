@@ -25,6 +25,9 @@ from nova.network.security_group import openstack_driver
 from nova.policies import security_group_default_rules as sgdr_policies
 
 
+ALIAS = "os-security-group-default-rules"
+
+
 class SecurityGroupDefaultRulesController(sg.SecurityGroupControllerBase,
                                           wsgi.Controller):
 
@@ -132,3 +135,20 @@ class SecurityGroupDefaultRulesController(sg.SecurityGroupControllerBase,
         sg_rule['ip_range'] = {}
         sg_rule['ip_range'] = {'cidr': rule['cidr']}
         return sg_rule
+
+
+class SecurityGroupDefaultRules(extensions.V21APIExtensionBase):
+    """Default rules for security group support."""
+    name = "SecurityGroupDefaultRules"
+    alias = ALIAS
+    version = 1
+
+    def get_resources(self):
+        resources = [
+            extensions.ResourceExtension(ALIAS,
+                SecurityGroupDefaultRulesController())]
+
+        return resources
+
+    def get_controller_extensions(self):
+        return []

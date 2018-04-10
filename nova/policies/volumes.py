@@ -19,18 +19,20 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-volumes'
+POLICY_ROOT = 'os_compute_api:os-volumes:%s'
 
 
 volumes_policies = [
-    policy.DocumentedRuleDefault(
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    base.create_rule_default(
         BASE_POLICY_NAME,
         base.RULE_ADMIN_OR_OWNER,
-        """Manage volumes for use with the Compute API.
+        """Manages volumes for use with the Compute API.
 
-Lists, shows details, creates, and deletes volumes and
-snapshots. These APIs are proxy calls to the Volume service.
-These are all deprecated.
-""",
+Lists, shows details, creates, and deletes volumes. These APIs are proxy calls
+to the Volume service. These are all deprecated.""",
        [
            {
                'method': 'GET',
@@ -51,26 +53,6 @@ These are all deprecated.
            {
                'method': 'DELETE',
                'path': '/os-volumes/{volume_id}'
-           },
-           {
-               'method': 'GET',
-               'path': '/os-snapshots'
-           },
-           {
-               'method': 'POST',
-               'path': '/os-snapshots'
-           },
-           {
-               'method': 'GET',
-               'path': '/os-snapshots/detail'
-           },
-           {
-               'method': 'GET',
-               'path': '/os-snapshots/{snapshot_id}'
-           },
-           {
-               'method': 'DELETE',
-               'path': '/os-snapshots/{snapshot_id}'
            }
       ]),
 ]

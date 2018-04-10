@@ -10,8 +10,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from sqlalchemy.sql.expression import asc
-
 from nova.db.sqlalchemy import api as db_api
 from nova.db.sqlalchemy import api_models
 from nova import exception
@@ -129,8 +127,7 @@ class CellMappingList(base.ObjectListBase, base.NovaObject):
     @staticmethod
     @db_api.api_context_manager.reader
     def _get_all_from_db(context):
-        return context.session.query(api_models.CellMapping).order_by(
-            asc(api_models.CellMapping.id)).all()
+        return context.session.query(api_models.CellMapping).all()
 
     @base.remotable_classmethod
     def get_all(cls, context):

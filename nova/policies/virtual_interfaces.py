@@ -19,13 +19,17 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-virtual-interfaces'
+POLICY_ROOT = 'os_compute_api:os-virtual-interfaces:%s'
 
 
 virtual_interfaces_policies = [
-    policy.DocumentedRuleDefault(
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    base.create_rule_default(
         BASE_POLICY_NAME,
         base.RULE_ADMIN_OR_OWNER,
-        """List virtual interfaces.
+        """List Virtual Interfaces.
 
 This works only with the nova-network service, which is now deprecated""",
         [

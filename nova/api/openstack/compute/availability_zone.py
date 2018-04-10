@@ -22,6 +22,7 @@ from nova.policies import availability_zone as az_policies
 from nova import servicegroup
 
 CONF = nova.conf.CONF
+ALIAS = "os-availability-zone"
 ATTRIBUTE_NAME = "availability_zone"
 
 
@@ -120,17 +121,37 @@ class AvailabilityZoneController(wsgi.Controller):
         return self._describe_availability_zones_verbose(context)
 
 
-# NOTE(gmann): This function is not supposed to use 'body_deprecated_param'
-# parameter as this is placed to handle scheduler_hint extension for V2.1.
-def server_create(server_dict, create_kwargs, body_deprecated_param):
-    # NOTE(alex_xu): For v2.1 compat mode, we strip the spaces when create
-    # availability_zone. But we don't strip at here for backward-compatible
-    # with some users already created availability_zone with
-    # leading/trailing spaces with legacy v2 API.
-    create_kwargs['availability_zone'] = server_dict.get(ATTRIBUTE_NAME)
+class AvailabilityZone(extensions.V21APIExtensionBase):
+    """1. Add availability_zone to the Create Server API.
+       2. Add availability zones describing.
+    """
 
+    name = "AvailabilityZone"
+    alias = ALIAS
+    version = 1
 
-def get_server_create_schema(version):
-    if version == "2.0":
-        return schema.server_create_v20
-    return schema.server_create
+    def get_resources(self):
+        resource = [extensions.ResourceExtension(ALIAS,
+            AvailabilityZoneController(),
+            collection_actions={'detail': 'GET'})]
+        return resource
+
+    def get_controller_extensions(self):
+        """It's an abstract function V21APIExtensionBase and the extension
+        will not be loaded without it.
+        """
+        return []
+
+    # NOTE(gmann): This function is not supposed to use 'body_deprecated_param'
+    # parameter as this is placed to handle scheduler_hint extension for V2.1.
+    def server_create(self, server_dict, create_kwargs, body_deprecated_param):
+        # NOTE(alex_xu): For v2.1 compat mode, we strip the spaces when create
+        # availability_zone. But we don't strip at here for backward-compatible
+        # with some users already created availability_zone with
+        # leading/trailing spaces with legacy v2 API.
+        create_kwargs['availability_zone'] = server_dict.get(ATTRIBUTE_NAME)
+
+    def get_server_create_schema(self, version):
+        if version == "2.0":
+            return schema.server_create_v20
+        return schema.server_create

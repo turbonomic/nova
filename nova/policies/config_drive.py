@@ -19,23 +19,16 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-config-drive'
+POLICY_ROOT = 'os_compute_api:os-config-drive:%s'
 
 
 config_drive_policies = [
-    policy.DocumentedRuleDefault(
-        BASE_POLICY_NAME,
-        base.RULE_ADMIN_OR_OWNER,
-        "Add 'config_drive' attribute in the server response",
-        [
-            {
-                'method': 'GET',
-                'path': '/servers/{id}'
-            },
-            {
-                'method': 'GET',
-                'path': '/servers/detail'
-            }
-        ]),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    policy.RuleDefault(
+        name=BASE_POLICY_NAME,
+        check_str=base.RULE_ADMIN_OR_OWNER),
 ]
 
 

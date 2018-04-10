@@ -38,7 +38,7 @@ from nova.api.metadata import base as instance_metadata
 from nova.compute import vm_states
 import nova.conf
 from nova import exception
-from nova.i18n import _
+from nova.i18n import _, _LI, _LE, _LW
 from nova import objects
 from nova.objects import fields
 from nova import utils
@@ -268,7 +268,7 @@ class VMOps(object):
     def spawn(self, context, instance, image_meta, injected_files,
               admin_password, network_info, block_device_info=None):
         """Create a new VM and start it."""
-        LOG.info("Spawning new instance", instance=instance)
+        LOG.info(_LI("Spawning new instance"), instance=instance)
 
         instance_name = instance.name
         if self._vmutils.vm_exists(instance_name):
@@ -319,13 +319,13 @@ class VMOps(object):
                 yield
         except etimeout.Timeout:
             # We never heard from Neutron
-            LOG.warning('Timeout waiting for vif plugging callback for '
-                        'instance.', instance=instance)
+            LOG.warning(_LW('Timeout waiting for vif plugging callback for '
+                            'instance.'), instance=instance)
             if CONF.vif_plugging_is_fatal:
                 raise exception.VirtualInterfaceCreateException()
 
     def _neutron_failed_callback(self, event_name, instance):
-        LOG.error('Neutron Reported failure on event %s',
+        LOG.error(_LE('Neutron Reported failure on event %s'),
                   event_name, instance=instance)
         if CONF.vif_plugging_is_fatal:
             raise exception.VirtualInterfaceCreateException()
@@ -357,10 +357,10 @@ class VMOps(object):
                       "has to be disabled in order for the instance to "
                       "benefit from it.", instance=instance)
             if CONF.hyperv.dynamic_memory_ratio > 1.0:
-                LOG.warning(
+                LOG.warning(_LW(
                     "Instance vNUMA topology requested, but dynamic memory "
                     "ratio is higher than 1.0 in nova.conf. Ignoring dynamic "
-                    "memory ratio option.", instance=instance)
+                    "memory ratio option."), instance=instance)
             dynamic_memory_ratio = 1.0
             vnuma_enabled = True
         else:
@@ -549,8 +549,8 @@ class VMOps(object):
         image_prop_vm = image_meta.properties.get('hw_machine_type',
                                                   default_vm_gen)
         if image_prop_vm not in self._hostutils.get_supported_vm_types():
-            reason = _('Requested VM Generation %s is not supported on '
-                       'this OS.') % image_prop_vm
+            reason = _LE('Requested VM Generation %s is not supported on '
+                         'this OS.') % image_prop_vm
             raise exception.InstanceUnacceptable(instance_id=instance_id,
                                                  reason=reason)
 
@@ -560,8 +560,8 @@ class VMOps(object):
         if (vm_gen != constants.VM_GEN_1 and root_vhd_path and
                 self._vhdutils.get_vhd_format(
                     root_vhd_path) == constants.DISK_FORMAT_VHD):
-            reason = _('Requested VM Generation %s, but provided VHD '
-                       'instead of VHDX.') % vm_gen
+            reason = _LE('Requested VM Generation %s, but provided VHD '
+                         'instead of VHDX.') % vm_gen
             raise exception.InstanceUnacceptable(instance_id=instance_id,
                                                  reason=reason)
 
@@ -628,7 +628,7 @@ class VMOps(object):
             raise exception.ConfigDriveUnsupportedFormat(
                 format=CONF.config_drive_format)
 
-        LOG.info('Using config drive for instance', instance=instance)
+        LOG.info(_LI('Using config drive for instance'), instance=instance)
 
         extra_md = {}
         if admin_password and CONF.hyperv.config_drive_inject_password:
@@ -640,7 +640,7 @@ class VMOps(object):
 
         configdrive_path_iso = self._pathutils.get_configdrive_path(
             instance.name, constants.DVD_FORMAT, rescue=rescue)
-        LOG.info('Creating config drive at %(path)s',
+        LOG.info(_LI('Creating config drive at %(path)s'),
                  {'path': configdrive_path_iso}, instance=instance)
 
         with configdrive.ConfigDriveBuilder(instance_md=inst_md) as cdb:
@@ -648,8 +648,9 @@ class VMOps(object):
                 cdb.make_drive(configdrive_path_iso)
             except processutils.ProcessExecutionError as e:
                 with excutils.save_and_reraise_exception():
-                    LOG.error('Creating config drive failed with '
-                              'error: %s', e, instance=instance)
+                    LOG.error(_LE('Creating config drive failed with '
+                                  'error: %s'),
+                              e, instance=instance)
 
         if not CONF.hyperv.config_drive_cdrom:
             configdrive_path = self._pathutils.get_configdrive_path(
@@ -692,15 +693,7 @@ class VMOps(object):
             if delete:
                 self._pathutils.remove(configdrive_path)
 
-    @serialconsoleops.instance_synchronized
     def _delete_disk_files(self, instance_name):
-        # We want to avoid the situation in which serial console workers
-        # are started while we perform this operation, preventing us from
-        # deleting the instance log files (bug #1556189). This can happen
-        # due to delayed instance lifecycle events.
-        #
-        # The unsynchronized method is being used to avoid a deadlock.
-        self._serial_console_ops.stop_console_handler_unsync(instance_name)
         self._pathutils.get_instance_dir(instance_name,
                                          create_dir=False,
                                          remove_dir=True)
@@ -708,7 +701,7 @@ class VMOps(object):
     def destroy(self, instance, network_info=None, block_device_info=None,
                 destroy_disks=True):
         instance_name = instance.name
-        LOG.info("Got request to destroy instance", instance=instance)
+        LOG.info(_LI("Got request to destroy instance"), instance=instance)
         try:
             if self._vmutils.vm_exists(instance_name):
 
@@ -725,7 +718,7 @@ class VMOps(object):
                 self._delete_disk_files(instance_name)
         except Exception:
             with excutils.save_and_reraise_exception():
-                LOG.exception(_('Failed to destroy instance: %s'),
+                LOG.exception(_LE('Failed to destroy instance: %s'),
                               instance_name)
 
     def reboot(self, instance, network_info, reboot_type):
@@ -761,7 +754,7 @@ class VMOps(object):
                           timeout, instance=instance)
                 self._vmutils.soft_shutdown_vm(instance.name)
                 if self._wait_for_power_off(instance.name, wait_time):
-                    LOG.info("Soft shutdown succeeded.",
+                    LOG.info(_LI("Soft shutdown succeeded."),
                              instance=instance)
                     return True
             except os_win_exc.HyperVException as e:
@@ -772,7 +765,7 @@ class VMOps(object):
 
             timeout -= retry_interval
 
-        LOG.warning("Timed out while waiting for soft shutdown.",
+        LOG.warning(_LW("Timed out while waiting for soft shutdown."),
                     instance=instance)
         return False
 
@@ -849,8 +842,8 @@ class VMOps(object):
                                              'req_state': req_state})
         except Exception:
             with excutils.save_and_reraise_exception():
-                LOG.error("Failed to change vm state of %(instance_name)s"
-                          " to %(req_state)s",
+                LOG.error(_LE("Failed to change vm state of %(instance_name)s"
+                              " to %(req_state)s"),
                           {'instance_name': instance_name,
                            'req_state': req_state})
 
@@ -973,9 +966,9 @@ class VMOps(object):
                                   image_meta, rescue_password)
         except Exception as exc:
             with excutils.save_and_reraise_exception():
-                LOG.error("Instance rescue failed. Exception: %(exc)s. "
-                          "Attempting to unrescue the instance.",
-                          {'exc': exc}, instance=instance)
+                err_msg = _LE("Instance rescue failed. Exception: %(exc)s. "
+                              "Attempting to unrescue the instance.")
+                LOG.error(err_msg, {'exc': exc}, instance=instance)
                 self.unrescue_instance(instance)
 
     def _rescue_instance(self, context, instance, network_info, image_meta,

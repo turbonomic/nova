@@ -19,39 +19,16 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-floating-ips'
+POLICY_ROOT = 'os_compute_api:os-floating-ips:%s'
 
 
 floating_ips_policies = [
-    policy.DocumentedRuleDefault(
-        BASE_POLICY_NAME,
-        base.RULE_ADMIN_OR_OWNER,
-        "Manage a project's floating IPs. These APIs are all deprecated.",
-        [
-            {
-                'method': 'POST',
-                'path': '/servers/{server_id}/action (addFloatingIp)'
-            },
-            {
-                'method': 'POST',
-                'path': '/servers/{server_id}/action (removeFloatingIp)'
-            },
-            {
-                'method': 'GET',
-                'path': '/os-floating-ips'
-            },
-            {
-                'method': 'POST',
-                'path': '/os-floating-ips'
-            },
-            {
-                'method': 'GET',
-                'path': '/os-floating-ips/{floating_ip_id}'
-            },
-            {
-                'method': 'DELETE',
-                'path': '/os-floating-ips/{floating_ip_id}'
-            },
-        ]),
+    policy.RuleDefault(
+        name=BASE_POLICY_NAME,
+        check_str=base.RULE_ADMIN_OR_OWNER),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
 ]
 
 

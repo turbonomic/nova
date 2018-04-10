@@ -25,8 +25,6 @@ LOG = logging.getLogger(__name__)
 
 class BaseRamFilter(filters.BaseHostFilter):
 
-    RUN_ON_REBUILD = False
-
     def _get_ram_allocation_ratio(self, host_state, spec_obj):
         raise NotImplementedError
 

@@ -23,7 +23,6 @@ from nova import context
 from nova import objects
 from nova.scheduler import rpcapi as scheduler_rpcapi
 from nova import test
-from nova.tests import uuidsentinel as uuids
 
 CONF = cfg.CONF
 
@@ -35,8 +34,7 @@ class SchedulerRpcAPITestCase(test.NoDBTestCase):
 
         rpcapi = scheduler_rpcapi.SchedulerAPI()
         self.assertIsNotNone(rpcapi.client)
-        self.assertEqual(rpcapi.client.target.topic,
-                         scheduler_rpcapi.RPC_TOPIC)
+        self.assertEqual(rpcapi.client.target.topic, CONF.scheduler_topic)
 
         expected_retval = 'foo' if rpc_method == 'call' else None
         expected_version = kwargs.pop('version', None)
@@ -75,17 +73,7 @@ class SchedulerRpcAPITestCase(test.NoDBTestCase):
     def test_select_destinations(self):
         fake_spec = objects.RequestSpec()
         self._test_scheduler_api('select_destinations', rpc_method='call',
-                expected_args={'spec_obj': fake_spec,
-                               'instance_uuids': [uuids.instance]},
-                spec_obj=fake_spec, instance_uuids=[uuids.instance],
-                version='4.4')
-
-    def test_select_destinations_4_3(self):
-        self.flags(scheduler='4.3', group='upgrade_levels')
-        fake_spec = objects.RequestSpec()
-        self._test_scheduler_api('select_destinations', rpc_method='call',
-                expected_args={'spec_obj': fake_spec},
-                spec_obj=fake_spec, instance_uuids=[uuids.instance],
+                spec_obj=fake_spec,
                 version='4.3')
 
     @mock.patch.object(objects.RequestSpec, 'to_legacy_filter_properties_dict')
@@ -99,7 +87,7 @@ class SchedulerRpcAPITestCase(test.NoDBTestCase):
         self._test_scheduler_api('select_destinations', rpc_method='call',
                 expected_args={'request_spec': 'fake_request_spec',
                                'filter_properties': 'fake_prop'},
-                spec_obj=fake_spec, instance_uuids=[uuids.instance],
+                spec_obj=fake_spec,
                 version='4.0')
 
     def test_update_aggregates(self):

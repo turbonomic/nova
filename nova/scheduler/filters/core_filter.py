@@ -26,8 +26,6 @@ LOG = logging.getLogger(__name__)
 
 class BaseCoreFilter(filters.BaseHostFilter):
 
-    RUN_ON_REBUILD = False
-
     def _get_cpu_allocation_ratio(self, host_state, spec_obj):
         raise NotImplementedError
 

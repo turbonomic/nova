@@ -177,7 +177,3 @@ def chown_for_id_maps(path, id_maps):
 
 def get_arch(image_meta):
     return libvirt_utils.get_arch(image_meta)
-
-
-def last_bytes(file_like_object, num):
-    return libvirt_utils.last_bytes(file_like_object, num)

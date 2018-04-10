@@ -19,19 +19,16 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-server-diagnostics'
+POLICY_ROOT = 'os_compute_api:os-server-diagnostics:%s'
 
 
 server_diagnostics_policies = [
-    policy.DocumentedRuleDefault(
-        BASE_POLICY_NAME,
-        base.RULE_ADMIN_API,
-        "Show the usage data for a server",
-        [
-            {
-                'method': 'GET',
-                'path': '/servers/{server_id}/diagnostics'
-            }
-        ]),
+    policy.RuleDefault(
+        name=BASE_POLICY_NAME,
+        check_str=base.RULE_ADMIN_API),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
 ]
 
 

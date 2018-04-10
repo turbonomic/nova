@@ -17,10 +17,13 @@ Unit Tests for nova.consoleauth.rpcapi
 """
 
 import mock
+from oslo_config import cfg
 
 from nova.consoleauth import rpcapi as consoleauth_rpcapi
 from nova import context
 from nova import test
+
+CONF = cfg.CONF
 
 
 class ConsoleAuthRpcAPITestCase(test.NoDBTestCase):
@@ -33,8 +36,7 @@ class ConsoleAuthRpcAPITestCase(test.NoDBTestCase):
 
         rpcapi = consoleauth_rpcapi.ConsoleAuthAPI()
         self.assertIsNotNone(rpcapi.client)
-        self.assertEqual(rpcapi.client.target.topic,
-                         consoleauth_rpcapi.RPC_TOPIC)
+        self.assertEqual(rpcapi.client.target.topic, CONF.consoleauth_topic)
 
         orig_prepare = rpcapi.client.prepare
 

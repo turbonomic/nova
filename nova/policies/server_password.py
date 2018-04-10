@@ -19,23 +19,16 @@ from nova.policies import base
 
 
 BASE_POLICY_NAME = 'os_compute_api:os-server-password'
+POLICY_ROOT = 'os_compute_api:os-server-password:%s'
 
 
 server_password_policies = [
-    policy.DocumentedRuleDefault(
-        BASE_POLICY_NAME,
-        base.RULE_ADMIN_OR_OWNER,
-        "Show and clear the encrypted administrative password of a server",
-        [
-            {
-                'method': 'GET',
-                'path': '/servers/{server_id}/os-server-password'
-            },
-            {
-                'method': 'DELETE',
-                'path': '/servers/{server_id}/os-server-password'
-            }
-        ]),
+    policy.RuleDefault(
+        name=BASE_POLICY_NAME,
+        check_str=base.RULE_ADMIN_OR_OWNER),
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
 ]
 
 

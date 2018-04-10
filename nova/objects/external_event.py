@@ -24,8 +24,6 @@ EVENT_NAMES = [
     'network-vif-unplugged',
     'network-vif-deleted',
 
-    # Volume was extended for this instance, tag is volume_id
-    'volume-extended',
 ]
 
 EVENT_STATUSES = ['failed', 'completed', 'in-progress']
@@ -36,8 +34,7 @@ class InstanceExternalEvent(obj_base.NovaObject):
     # Version 1.0: Initial version
     #              Supports network-changed and vif-plugged
     # Version 1.1: adds network-vif-deleted event
-    # Version 1.2: adds volume-extended event
-    VERSION = '1.2'
+    VERSION = '1.1'
 
     fields = {
         'instance_uuid': fields.UUIDField(),

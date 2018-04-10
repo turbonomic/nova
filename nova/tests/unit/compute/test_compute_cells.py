@@ -27,17 +27,14 @@ from nova.cells import manager
 from nova.compute import api as compute_api
 from nova.compute import cells_api as compute_cells_api
 from nova.compute import flavors
-from nova.compute import power_state
+from nova.compute import task_states
 from nova.compute import utils as compute_utils
 from nova.compute import vm_states
 import nova.conf
 from nova import context
 from nova import db
-from nova.db.sqlalchemy import api as db_api
-from nova.db.sqlalchemy import api_models
 from nova import exception
 from nova import objects
-from nova.objects import fields as obj_fields
 from nova import quota
 from nova import test
 from nova.tests.unit.compute import test_compute
@@ -49,10 +46,6 @@ from nova.tests import uuidsentinel as uuids
 
 ORIG_COMPUTE_API = None
 CONF = nova.conf.CONF
-FAKE_IMAGE_REF = uuids.image_ref
-
-NODENAME = 'fakenode1'
-NODENAME2 = 'fakenode2'
 
 
 def stub_call_to_cells(context, instance, method, *args, **kwargs):
@@ -161,81 +154,6 @@ class CellsComputeAPITestCase(test_compute.ComputeAPITestCase):
 
     def test_create_instance_associates_security_groups(self):
         self.skipTest("Test is incompatible with cells.")
-
-    @mock.patch('nova.objects.quotas.Quotas.check_deltas')
-    def test_create_instance_over_quota_during_recheck(
-            self, check_deltas_mock):
-        self.stub_out('nova.tests.unit.image.fake._FakeImageService.show',
-                      self.fake_show)
-
-        # Simulate a race where the first check passes and the recheck fails.
-        fake_quotas = {'instances': 5, 'cores': 10, 'ram': 4096}
-        fake_headroom = {'instances': 5, 'cores': 10, 'ram': 4096}
-        fake_usages = {'instances': 5, 'cores': 10, 'ram': 4096}
-        exc = exception.OverQuota(overs=['instances'], quotas=fake_quotas,
-                                  headroom=fake_headroom, usages=fake_usages)
-        check_deltas_mock.side_effect = [None, exc]
-
-        inst_type = flavors.get_default_flavor()
-        # Try to create 3 instances.
-        self.assertRaises(exception.QuotaError, self.compute_api.create,
-            self.context, inst_type, self.fake_image['id'], min_count=3)
-
-        project_id = self.context.project_id
-
-        self.assertEqual(2, check_deltas_mock.call_count)
-        call1 = mock.call(self.context,
-                          {'instances': 3, 'cores': inst_type.vcpus * 3,
-                           'ram': inst_type.memory_mb * 3},
-                          project_id, user_id=None,
-                          check_project_id=project_id, check_user_id=None)
-        call2 = mock.call(self.context, {'instances': 0, 'cores': 0, 'ram': 0},
-                          project_id, user_id=None,
-                          check_project_id=project_id, check_user_id=None)
-        check_deltas_mock.assert_has_calls([call1, call2])
-
-        # Verify we removed the artifacts that were added after the first
-        # quota check passed.
-        instances = objects.InstanceList.get_all(self.context)
-        self.assertEqual(0, len(instances))
-        build_requests = objects.BuildRequestList.get_all(self.context)
-        self.assertEqual(0, len(build_requests))
-
-        @db_api.api_context_manager.reader
-        def request_spec_get_all(context):
-            return context.session.query(api_models.RequestSpec).all()
-
-        request_specs = request_spec_get_all(self.context)
-        self.assertEqual(0, len(request_specs))
-
-        instance_mappings = objects.InstanceMappingList.get_by_project_id(
-            self.context, project_id)
-        self.assertEqual(0, len(instance_mappings))
-
-    @mock.patch('nova.objects.quotas.Quotas.check_deltas')
-    def test_create_instance_no_quota_recheck(
-            self, check_deltas_mock):
-        self.stub_out('nova.tests.unit.image.fake._FakeImageService.show',
-                      self.fake_show)
-        # Disable recheck_quota.
-        self.flags(recheck_quota=False, group='quota')
-
-        inst_type = flavors.get_default_flavor()
-        (refs, resv_id) = self.compute_api.create(self.context,
-                                                  inst_type,
-                                                  self.fake_image['id'])
-        self.assertEqual(1, len(refs))
-
-        project_id = self.context.project_id
-
-        # check_deltas should have been called only once.
-        check_deltas_mock.assert_called_once_with(self.context,
-                                                  {'instances': 1,
-                                                   'cores': inst_type.vcpus,
-                                                   'ram': inst_type.memory_mb},
-                                                  project_id, user_id=None,
-                                                  check_project_id=project_id,
-                                                  check_user_id=None)
 
     @mock.patch.object(compute_api.API, '_local_delete')
     @mock.patch.object(compute_api.API, '_lookup_instance',
@@ -533,61 +451,15 @@ class CellsShelveComputeAPITestCase(test_shelve.ShelveComputeAPITestCase):
         def _fake_validate_cell(*args, **kwargs):
             return
 
+        def _fake_cast_to_cells(self, context, instance, method,
+                                *args, **kwargs):
+            fn = getattr(ORIG_COMPUTE_API, method)
+            fn(context, instance, *args, **kwargs)
+
         self.stub_out('nova.compute.api.API._validate_cell',
                       _fake_validate_cell)
-
-    def _create_fake_instance_obj(self, params=None, type_name='m1.tiny',
-                                  services=False, context=None):
-        flavor = flavors.get_flavor_by_name(type_name)
-        inst = objects.Instance(context=context or self.context)
-        inst.cell_name = 'api!child'
-        inst.vm_state = vm_states.ACTIVE
-        inst.task_state = None
-        inst.power_state = power_state.RUNNING
-        inst.image_ref = FAKE_IMAGE_REF
-        inst.reservation_id = 'r-fakeres'
-        inst.user_id = self.user_id
-        inst.project_id = self.project_id
-        inst.host = self.compute.host
-        inst.node = NODENAME
-        inst.instance_type_id = flavor.id
-        inst.ami_launch_index = 0
-        inst.memory_mb = 0
-        inst.vcpus = 0
-        inst.root_gb = 0
-        inst.ephemeral_gb = 0
-        inst.architecture = obj_fields.Architecture.X86_64
-        inst.os_type = 'Linux'
-        inst.system_metadata = (
-            params and params.get('system_metadata', {}) or {})
-        inst.locked = False
-        inst.created_at = timeutils.utcnow()
-        inst.updated_at = timeutils.utcnow()
-        inst.launched_at = timeutils.utcnow()
-        inst.security_groups = objects.SecurityGroupList(objects=[])
-        inst.flavor = flavor
-        inst.old_flavor = None
-        inst.new_flavor = None
-        if params:
-            inst.flavor.update(params.pop('flavor', {}))
-            inst.update(params)
-        inst.create()
-
-        return inst
-
-    def _test_shelve(self, vm_state=vm_states.ACTIVE,
-                     boot_from_volume=False, clean_shutdown=True):
-        params = dict(task_state=None, vm_state=vm_state,
-                      display_name='fake-name')
-        instance = self._create_fake_instance_obj(params=params)
-        with mock.patch.object(self.compute_api,
-                               '_cast_to_cells') as cast_to_cells:
-            self.compute_api.shelve(self.context, instance,
-                                    clean_shutdown=clean_shutdown)
-            cast_to_cells.assert_called_once_with(self.context,
-                                                  instance, 'shelve',
-                                                  clean_shutdown=clean_shutdown
-                                                  )
+        self.stub_out('nova.compute.cells_api.ComputeCellsAPI._cast_to_cells',
+                      _fake_cast_to_cells)
 
     def test_unshelve(self):
         # Ensure instance can be unshelved on cell environment.
@@ -602,11 +474,9 @@ class CellsShelveComputeAPITestCase(test_shelve.ShelveComputeAPITestCase):
         instance.vm_state = vm_states.SHELVED
         instance.save()
 
-        with mock.patch.object(self.compute_api,
-                               '_cast_to_cells') as cast_to_cells:
-            self.compute_api.unshelve(self.context, instance)
-            cast_to_cells.assert_called_once_with(self.context,
-                                                  instance, 'unshelve')
+        self.compute_api.unshelve(self.context, instance)
+
+        self.assertEqual(task_states.UNSHELVING, instance.task_state)
 
     def tearDown(self):
         global ORIG_COMPUTE_API
@@ -703,16 +573,13 @@ class CellsConductorAPIRPCRedirect(test.NoDBTestCase):
         orig_system_metadata = {}
         instance = fake_instance.fake_instance_obj(self.context,
                 vm_state=vm_states.ACTIVE, cell_name='fake-cell',
-                launched_at=timeutils.utcnow(), image_ref=uuids.image_id,
+                launched_at=timeutils.utcnow(),
                 system_metadata=orig_system_metadata,
                 expected_attrs=['system_metadata'])
         get_flavor.return_value = ''
-        # The API request schema validates that a UUID is passed for the
-        # imageRef parameter so we need to provide an image.
-        image_href = uuids.image_id
+        image_href = ''
         image = {"min_ram": 10, "min_disk": 1,
-                 "properties": {'architecture': 'x86_64'},
-                 "id": uuids.image_id}
+                 "properties": {'architecture': 'x86_64'}}
         admin_pass = ''
         files_to_inject = []
         bdms = objects.BlockDeviceMappingList()

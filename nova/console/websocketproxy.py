@@ -31,6 +31,7 @@ from nova.consoleauth import rpcapi as consoleauth_rpcapi
 from nova import context
 from nova import exception
 from nova.i18n import _
+from nova.i18n import _LW
 
 LOG = logging.getLogger(__name__)
 
@@ -95,7 +96,7 @@ class NovaProxyRequestHandlerBase(object):
                     except Cookie.CookieError:
                         # NOTE(stgleb): Do not print out cookie content
                         # for security reasons.
-                        LOG.warning('Found malformed cookie')
+                        LOG.warning(_LW('Found malformed cookie'))
                     else:
                         if 'token' in cookie:
                             token = cookie['token'].value
@@ -146,15 +147,12 @@ class NovaProxyRequestHandlerBase(object):
         if connect_info.get('internal_access_path'):
             tsock.send("CONNECT %s HTTP/1.1\r\n\r\n" %
                         connect_info['internal_access_path'])
-            end_token = "\r\n\r\n"
             while True:
                 data = tsock.recv(4096, socket.MSG_PEEK)
-                token_loc = data.find(end_token)
-                if token_loc != -1:
+                if data.find("\r\n\r\n") != -1:
                     if data.split("\r\n")[0].find("200") == -1:
                         raise exception.InvalidConnectionInfo()
-                    # remove the response from recv buffer
-                    tsock.recv(token_loc + len(end_token))
+                    tsock.recv(len(data))
                     break
 
         # Start proxying

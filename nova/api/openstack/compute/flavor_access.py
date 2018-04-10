@@ -21,12 +21,13 @@ from nova.api.openstack import api_version_request
 from nova.api.openstack import common
 from nova.api.openstack.compute.schemas import flavor_access
 from nova.api.openstack import extensions
-from nova.api.openstack import identity
 from nova.api.openstack import wsgi
 from nova.api import validation
 from nova import exception
 from nova.i18n import _
 from nova.policies import flavor_access as fa_policies
+
+ALIAS = 'os-flavor-access'
 
 
 def _marshall_flavor_access(flavor):
@@ -59,7 +60,7 @@ class FlavorAccessController(wsgi.Controller):
 class FlavorActionController(wsgi.Controller):
     """The flavor access API controller for the OpenStack API."""
     def _extend_flavor(self, flavor_rval, flavor_ref):
-        key = "os-flavor-access:is_public"
+        key = "%s:is_public" % (FlavorAccess.alias)
         flavor_rval[key] = flavor_ref['is_public']
 
     @wsgi.extends
@@ -96,7 +97,6 @@ class FlavorActionController(wsgi.Controller):
 
         vals = body['addTenantAccess']
         tenant = vals['tenant']
-        identity.verify_project_id(context, tenant)
 
         flavor = common.get_flavor(context, id)
 
@@ -122,7 +122,6 @@ class FlavorActionController(wsgi.Controller):
 
         vals = body['removeTenantAccess']
         tenant = vals['tenant']
-        identity.verify_project_id(context, tenant)
 
         # NOTE(gibi): We have to load a flavor from the db here as
         # flavor.remove_access() will try to emit a notification and that needs
@@ -135,3 +134,25 @@ class FlavorActionController(wsgi.Controller):
                 exception.FlavorNotFound) as e:
             raise webob.exc.HTTPNotFound(explanation=e.format_message())
         return _marshall_flavor_access(flavor)
+
+
+class FlavorAccess(extensions.V21APIExtensionBase):
+    """Flavor access support."""
+
+    name = "FlavorAccess"
+    alias = ALIAS
+    version = 1
+
+    def get_resources(self):
+        res = extensions.ResourceExtension(
+            ALIAS,
+            controller=FlavorAccessController(),
+            parent=dict(member_name='flavor', collection_name='flavors'))
+
+        return [res]
+
+    def get_controller_extensions(self):
+        extension = extensions.ControllerExtension(
+                self, 'flavors', FlavorActionController())
+
+        return [extension]

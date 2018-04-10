@@ -22,7 +22,7 @@ POLICY_ROOT = 'os_compute_api:os-volumes-attachments:%s'
 
 
 volumes_attachments_policies = [
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'index',
         base.RULE_ADMIN_OR_OWNER,
         "List volume attachments for an instance",
@@ -31,7 +31,7 @@ volumes_attachments_policies = [
              'path': '/servers/{server_id}/os-volume_attachments'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'create',
         base.RULE_ADMIN_OR_OWNER,
         "Attach a volume to an instance",
@@ -41,7 +41,7 @@ volumes_attachments_policies = [
                 'path': '/servers/{server_id}/os-volume_attachments'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'show',
         base.RULE_ADMIN_OR_OWNER,
         "Show details of a volume attachment",
@@ -52,7 +52,10 @@ volumes_attachments_policies = [
                  '/servers/{server_id}/os-volume_attachments/{attachment_id}'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    policy.RuleDefault(
+        name=POLICY_ROOT % 'discoverable',
+        check_str=base.RULE_ANY),
+    base.create_rule_default(
         POLICY_ROOT % 'update',
         base.RULE_ADMIN_API,
         "Update a volume attachment",
@@ -63,7 +66,7 @@ volumes_attachments_policies = [
                  '/servers/{server_id}/os-volume_attachments/{attachment_id}'
             }
         ]),
-    policy.DocumentedRuleDefault(
+    base.create_rule_default(
         POLICY_ROOT % 'delete',
         base.RULE_ADMIN_OR_OWNER,
         "Detach a volume from an instance",

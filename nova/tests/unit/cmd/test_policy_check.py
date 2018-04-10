@@ -112,9 +112,8 @@ class TestPolicyCheck(test.NoDBTestCase):
     def _check_filter_rules(self, context=None, target=None,
                             expected_rules=None):
         context = context or nova_context.get_admin_context()
-        if expected_rules is None:
-            expected_rules = [
-                r.name for r in ia_policies.list_rules()]
+        expected_rules = expected_rules or [
+            r.name for r in ia_policies.list_rules()]
 
         passing_rules = self.cmd._filter_rules(
             context, 'os-instance-actions', target)

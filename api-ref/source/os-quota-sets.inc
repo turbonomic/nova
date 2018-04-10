@@ -1,7 +1,5 @@
 .. -*- rst -*-
 
-.. _os-quota-sets:
-
 ============================
  Quota sets (os-quota-sets)
 ============================
@@ -53,7 +51,6 @@ Response
   - security_groups: security_groups_quota
   - server_groups: server_groups
   - server_group_members: server_group_members
-  - networks: networks_quota_set_optional
 
 **Example Show A Quota: JSON response**
 
@@ -102,7 +99,6 @@ Request
   - security_groups: security_groups_quota_optional
   - server_groups: server_groups_quota_optional
   - server_group_members: server_group_members_quota_optional
-  - networks: networks_quota_set_optional
 
 **Example Update Quotas: JSON request**
 
@@ -134,7 +130,6 @@ Response
   - security_groups: security_groups_quota
   - server_groups: server_groups
   - server_group_members: server_group_members
-  - networks: networks_quota_set_optional
 
 **Example Update Quotas: JSON response**
 
@@ -206,7 +201,6 @@ Response
   - security_groups: security_groups_quota
   - server_groups: server_groups
   - server_group_members: server_group_members
-  - networks: networks_quota_set_optional
 
 **Example List Default Quotas For Tenant: JSON response**
 
@@ -258,7 +252,6 @@ Response
   - security_groups: security_groups_quota_details
   - server_groups: server_groups_quota_details
   - server_group_members: server_group_members_quota_details
-  - networks: networks_quota_set_optional
 
 **Example Show A Quota: JSON response**
 

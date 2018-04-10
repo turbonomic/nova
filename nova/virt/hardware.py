@@ -25,7 +25,7 @@ import six
 import nova.conf
 from nova import context
 from nova import exception
-from nova.i18n import _
+from nova.i18n import _, _LI
 from nova import objects
 from nova.objects import fields
 from nova.objects import instance as obj_instance
@@ -571,8 +571,7 @@ def _get_desirable_cpu_topologies(flavor, image_meta, allow_threads=True,
     if numa_topology:
         min_requested_threads = None
         cell_topologies = [cell.cpu_topology for cell in numa_topology.cells
-                           if ('cpu_topology' in cell
-                               and cell.cpu_topology)]
+                           if cell.cpu_topology]
         if cell_topologies:
             min_requested_threads = min(
                     topo.threads for topo in cell_topologies)
@@ -784,8 +783,8 @@ def _pack_instance_onto_cores(available_siblings,
         # vcpus_pinning=[(2, 0), (3, 4)]
         vcpus_pinning = list(zip(sorted(instance_cores),
                                  itertools.chain(*usable_cores)))
-        msg = ("Computed NUMA topology CPU pinning: usable pCPUs: "
-               "%(usable_cores)s, vCPUs mapping: %(vcpus_pinning)s")
+        msg = _LI("Computed NUMA topology CPU pinning: usable pCPUs: "
+                  "%(usable_cores)s, vCPUs mapping: %(vcpus_pinning)s")
         msg_args = {
             'usable_cores': usable_cores,
             'vcpus_pinning': vcpus_pinning,
@@ -809,8 +808,8 @@ def _pack_instance_onto_cores(available_siblings,
             # cpuset_reserved=[4]
             cpuset_reserved = set(list(
                 itertools.chain(*usable_cores))[:num_cpu_reserved])
-            msg = ("Computed NUMA topology reserved pCPUs: usable pCPUs: "
-                   "%(usable_cores)s, reserved pCPUs: %(cpuset_reserved)s")
+            msg = _LI("Computed NUMA topology reserved pCPUs: usable pCPUs: "
+                      "%(usable_cores)s, reserved pCPUs: %(cpuset_reserved)s")
             msg_args = {
                 'usable_cores': usable_cores,
                 'cpuset_reserved': cpuset_reserved,
@@ -928,11 +927,9 @@ def _numa_fit_instance_cell_with_pinning(host_cell, instance_cell,
     if host_cell.avail_memory < instance_cell.memory:
         LOG.debug('Not enough available memory to schedule instance. '
                   'Oversubscription is not possible with pinned instances. '
-                  'Required: %(required)s, available: %(available)s, '
-                  'total: %(total)s. ',
+                  'Required: %(required)s, actual: %(actual)s',
                   {'required': instance_cell.memory,
-                   'available': host_cell.avail_memory,
-                   'total': host_cell.memory})
+                   'actual': host_cell.memory})
         return
 
     if host_cell.siblings:
@@ -945,9 +942,9 @@ def _numa_fit_instance_cell_with_pinning(host_cell, instance_cell,
     else:
         if (instance_cell.cpu_thread_policy ==
                 fields.CPUThreadAllocationPolicy.REQUIRE):
-            LOG.info("Host does not support hyperthreading or "
-                     "hyperthreading is disabled, but 'require' "
-                     "threads policy was requested.")
+            LOG.info(_LI("Host does not support hyperthreading or "
+                         "hyperthreading is disabled, but 'require' "
+                         "threads policy was requested."))
             return
 
         # Straightforward to pin to available cpus when there is no
@@ -1025,7 +1022,7 @@ def _numa_fit_instance_cell(host_cell, instance_cell, limit_cell=None,
             LOG.debug('Host cell has limitations on usable CPUs. There are '
                       'not enough free CPUs to schedule this instance. '
                       'Usage: %(usage)d, limit: %(limit)d',
-                      {'usage': cpu_usage, 'limit': cpu_limit})
+                      {'usage': memory_usage, 'limit': cpu_limit})
             return
 
     pagesize = None
@@ -1481,19 +1478,10 @@ def numa_fit_instance_to_host(
     if 'emulator_threads_policy' in instance_topology:
         emulator_threads_policy = instance_topology.emulator_threads_policy
 
-    host_cells = host_topology.cells
-
-    # If PCI device(s) are not required, prefer host cells that don't have
-    # devices attached. Presence of a given numa_node in a PCI pool is
-    # indicative of a PCI device being associated with that node
-    if not pci_requests and pci_stats:
-        host_cells = sorted(host_cells, key=lambda cell: cell.id in [
-            pool['numa_node'] for pool in pci_stats.pools])
-
     # TODO(ndipanov): We may want to sort permutations differently
     # depending on whether we want packing/spreading over NUMA nodes
     for host_cell_perm in itertools.permutations(
-            host_cells, len(instance_topology)):
+            host_topology.cells, len(instance_topology)):
         cells = []
         for host_cell, instance_cell in zip(
                 host_cell_perm, instance_topology.cells):
@@ -1705,7 +1693,6 @@ def instance_topology_from_instance(instance):
                     cpuset=set(cell['cpuset']),
                     memory=cell['memory'],
                     pagesize=cell.get('pagesize'),
-                    cpu_topology=cell.get('cpu_topology'),
                     cpu_pinning=cell.get('cpu_pinning_raw'),
                     cpu_policy=cell.get('cpu_policy'),
                     cpu_thread_policy=cell.get('cpu_thread_policy'),

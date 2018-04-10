@@ -13,7 +13,7 @@
    deprecated all the proxy APIs and users should use the native APIs
    instead. These will fail with a 404 starting from microversion 2.36.
    See: `Relevant Network APIs
-   <https://developer.openstack.org/api-ref/networking/v2/#security-groups-security-groups>`__.
+   <http://developer.openstack.org/api-ref/networking/v2-ext/index.html#security-groups-security-groups>`__.
 
 Lists, shows information for, creates, updates and deletes security groups.
 
@@ -41,9 +41,9 @@ Response
 
 .. rest_parameters:: parameters.yaml
 
-  - security_groups: security_groups_obj
+  - security_groups: security_groups
   - description: description
-  - id: security_group_id_body
+  - id: id
   - name: name
   - rules: rules
   - tenant_id: tenant_id_body
@@ -86,7 +86,7 @@ Response
 
   - security_group: security_group
   - description: description
-  - id: security_group_id_body
+  - id: id
   - name: name
   - rules: rules
   - tenant_id: tenant_id_body
@@ -122,7 +122,7 @@ Response
 
   - security_group: security_group
   - description: description
-  - id: security_group_id_body
+  - id: id
   - name: name
   - rules: rules
   - tenant_id: tenant_id_body
@@ -165,7 +165,7 @@ Response
 
   - security_group: security_group
   - description: description
-  - id: security_group_id_body
+  - id: id
   - name: name
   - rules: rules
   - tenant_id: tenant_id_body

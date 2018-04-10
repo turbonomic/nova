@@ -28,7 +28,7 @@ import six
 import nova.conf
 import nova.db.api
 from nova import exception
-from nova.i18n import _
+from nova.i18n import _, _LE
 from nova import utils
 
 CONF = nova.conf.CONF
@@ -44,8 +44,8 @@ def block_db_access(service_name):
 
         def __call__(self, *args, **kwargs):
             stacktrace = "".join(traceback.format_stack())
-            LOG.error('No db access allowed in %(service_name)s: '
-                      '%(stacktrace)s',
+            LOG.error(_LE('No db access allowed in %(service_name)s: '
+                          '%(stacktrace)s'),
                       dict(service_name=service_name, stacktrace=stacktrace))
             raise exception.DBNotAllowed(service_name)
 
@@ -102,20 +102,14 @@ def add_command_parsers(subparsers, categories):
 
             action_kwargs = []
             for args, kwargs in getattr(action_fn, 'args', []):
-                # we must handle positional parameters (ARG) separately from
-                # positional parameters (--opt). Detect this by checking for
-                # the presence of leading '--'
-                if args[0] != args[0].lstrip('-'):
-                    kwargs.setdefault('dest', args[0].lstrip('-'))
-                    if kwargs['dest'].startswith('action_kwarg_'):
-                        action_kwargs.append(
-                            kwargs['dest'][len('action_kwarg_'):])
-                    else:
-                        action_kwargs.append(kwargs['dest'])
-                        kwargs['dest'] = 'action_kwarg_' + kwargs['dest']
+                # FIXME(markmc): hack to assume dest is the arg name without
+                # the leading hyphens if no dest is supplied
+                kwargs.setdefault('dest', args[0][2:])
+                if kwargs['dest'].startswith('action_kwarg_'):
+                    action_kwargs.append(kwargs['dest'][len('action_kwarg_'):])
                 else:
-                    action_kwargs.append(args[0])
-                    args = ['action_kwarg_' + arg for arg in args]
+                    action_kwargs.append(kwargs['dest'])
+                    kwargs['dest'] = 'action_kwarg_' + kwargs['dest']
 
                 parser.add_argument(*args, **kwargs)
 
