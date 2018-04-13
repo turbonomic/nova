@@ -23,13 +23,13 @@ the following entries must be added in the /etc/nova/nova.conf file
 under the [DEFAULT] section
 ------------------------------------------------------------
 scheduler_driver = nova.scheduler.turbonomic_scheduler.TurbonomicScheduler
-turbonomic_protocol = <Turbonomic_Protocol>
-turbonomic_address = <Turbonomic_Address>
-turbonomic_target_address = <Turbonomic_Target_Address>
-turbonomic_timeout = <Turbonomic_Timeout>
-turbonomic_username = <Turbonomic_UserName>
-turbonomic_password = <Turbonomic_Password>
-turbonomic_verify_ssl = <Verify_ssl_certificate, defaults to False>
+turbonomic_address = <Turbonomic_Address>  - mandatory
+turbonomic_target_address = <Turbonomic_Target_Address> - mandatory
+turbonomic_username = <Turbonomic_UserName> - optional, defaults to administrator
+turbonomic_password = <Turbonomic_Password> - optional, defaults to administrator
+turbonomic_protocol = <Turbonomic_Protocol> - optional, defaults to https
+turbonomic_timeout = <Turbonomic_Timeout> - optional, defaults to 60 seconds
+turbonomic_verify_ssl = <Verify_ssl_certificate> - optional, defaults to False
 ------------------------------------------------------------
 NOTE: 1) 'scheduler_driver' might already be configured to the default scheduler
        Needs to be replaced if that's the case
@@ -69,7 +69,7 @@ import uuid
 
 ext_opts = [
     cfg.StrOpt('turbonomic_protocol', default='https', help='turbonomic Server protocol, http or https'),
-    cfg.StrOpt('turbonomic_address', default='URI', help='turbonomic Server address'),
+    cfg.StrOpt('turbonomic_address', default='default-address', help='turbonomic Server address'),
     cfg.StrOpt('turbonomic_target_address', default='default-address', help='OSP target address'),
     cfg.StrOpt('turbonomic_timeout', default='60', help='turbonomic request timeout'),
     cfg.StrOpt('turbonomic_username', default='administrator', help='turbonomic Server Username'),
@@ -96,6 +96,14 @@ class TurbonomicScheduler(driver.Scheduler):
             self.turbonomic_rest_endpoint, self.turbonomic_target_address, self.verify_ssl, self.turbonomic_timeout))
 
     def select_destinations(self, context, spec_obj):
+        if 'default-address' in self.turbonomic_rest_endpoint:
+            LOG.error('Turbonomic address not specified')
+            raise exception.NoValidHost(reason='Turbonomic address not specified')
+
+        if self.turbonomic_target_address == 'default-address':
+            LOG.error('Turbonomic target address not specified')
+            raise exception.NoValidHost(reason='Turbonomic target address not specified')
+
         self.notifier.info(context, 'turbonomic_scheduler.select_destinations.start',
                            dict(request_spec=spec_obj.to_legacy_request_spec_dict()))
         LOG.info('Selecting destinations, CTX: {}'.format(str(context)))
@@ -139,12 +147,12 @@ class TurbonomicScheduler(driver.Scheduler):
                 LOG.info('Authenticated as {}'.format(self.auth[0]))
             else:
                 LOG.info('Error authenticating as {}'.format(self.auth[0]))
-                raise Exception('Authentication error')
+                raise exception.NoValidHost(reason = 'Authentication error')
 
         except exceptions.ReadTimeout:
             LOG.info('Login request timed out: {}, username: {} '.format(self.turbonomic_rest_endpoint + "login",
                                                                                     self.auth[0]))
-            raise Exception('Login request timed out')
+            raise exception.NoValidHost(reason = 'Login request timed out')
 
     def get_dc_uuid(self, availability_zone):
         LOG.info('Searching for DC: target: {}, AZ: {}'.format(self.turbonomic_target_address, availability_zone))
@@ -167,7 +175,6 @@ class TurbonomicScheduler(driver.Scheduler):
         except exceptions.ReadTimeout:
             LOG.info('DC search request timed out: {}'.format(self.turbonomic_rest_endpoint + 'search?types=DataCenter'))
             raise exception.NoValidHost(reason='DC search request timed out')
-
 
     def get_template_uuid(self, template_name):
         full_template_name = '{}:{}::TMP-{}'.format(self.turbonomic_target_address, self.region, template_name)
@@ -217,10 +224,10 @@ class TurbonomicScheduler(driver.Scheduler):
             return selected_hosts
 
         if spec_obj.availability_zone is None:
-            raise Exception('Availability zone not set')
+            raise exception.NoValidHost(reason = 'Availability zone not set')
 
         if context.remote_address is None:
-            raise Exception('Remote address not set')
+            raise exception.NoValidHost(reason = 'Remote address not set')
 
         dc_uuid = self.get_dc_uuid(spec_obj.availability_zone)
 
@@ -280,10 +287,10 @@ class TurbonomicScheduler(driver.Scheduler):
             else:
                 resp = placement_response.json()
                 LOG.info('Error creating placement: {}'.format(str(resp)))
-                raise Exception(resp['message'])
+                raise exception.NoValidHost(reason = resp['message'])
 
             return selected_hosts
 
         except exceptions.ReadTimeout:
             LOG.info('Placement request timed out {}'.format(self.turbonomic_rest_endpoint + 'reservations'))
-            raise Exception('Placement request timed out')
+            raise exception.NoValidHost(reason = 'Placement request timed out')
