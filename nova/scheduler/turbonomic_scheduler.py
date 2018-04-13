@@ -25,6 +25,7 @@ under the [DEFAULT] section
 scheduler_driver = nova.scheduler.turbonomic_scheduler.TurbonomicScheduler
 turbonomic_protocol = <Turbonomic_Protocol>
 turbonomic_address = <Turbonomic_Address>
+turbonomic_target_address = <Turbonomic_Target_Address>
 turbonomic_timeout = <Turbonomic_Timeout>
 turbonomic_username = <Turbonomic_UserName>
 turbonomic_password = <Turbonomic_Password>
@@ -33,7 +34,9 @@ turbonomic_verify_ssl = <Verify_ssl_certificate, defaults to False>
 NOTE: 1) 'scheduler_driver' might already be configured to the default scheduler
        Needs to be replaced if that's the case
 
-      2) scheduler_driver should be enabled across all regions.
+      2) scheduler_driver should be enabled across all regions, turbonomic_target_address must be equal to the address specified
+      by the customer while discovering the target, e.x. a target consists of RegionOne (X.X.X.10) and RegionTwo (X.X.X.11)
+      turbonomic_target_address must be set equal to X.X.X.10 both in RegionOne and RegionTwo
 
       3) In order to force NOVA deploy a new VM on a specific host, run the following command:
         nova boot --flavor <FLAVOR_ID> --image <IMG_UUID> --nic net-id=<NIC_ID> --availability-zone <AVAILABILITY_ZONE>:<HOST_NAME> <VM_NAME>
@@ -43,11 +46,9 @@ NOTE: 1) 'scheduler_driver' might already be configured to the default scheduler
 
       5) This script should be placed to /lib/python2.7/site-packages/nova/scheduler
 
-    At the time of writing features 3 and 4 were unavailable in OpenStack UI and could be used only from CLI. Turbonomic supports CLI deployment
-    for the region whose address is equal to controller address only, e.x. Target1 address is X.X.X.10, RegionOne is on X.X.X.10, RegionTwo on
-    X.X.X.11, RegionThree on X.X.X.12 so commands 3) and 4) will succeed only for RegionOne on X.X.X.10 and will fail or timeout for RegionTwo
-    and RegionThree
+      6) This script is designed for OpenStack Mitaka
 
+    At the time of writing features 3 and 4 were unavailable in OpenStack UI and could be used only from CLI.
 """
 
 from oslo_config import cfg
@@ -69,6 +70,7 @@ import uuid
 ext_opts = [
     cfg.StrOpt('turbonomic_protocol', default='https', help='turbonomic Server protocol, http or https'),
     cfg.StrOpt('turbonomic_address', default='URI', help='turbonomic Server address'),
+    cfg.StrOpt('turbonomic_target_address', default='default-address', help='OSP target address'),
     cfg.StrOpt('turbonomic_timeout', default='60', help='turbonomic request timeout'),
     cfg.StrOpt('turbonomic_username', default='administrator', help='turbonomic Server Username'),
     cfg.StrOpt('turbonomic_password', default='administrator', help='turbonomic Server Password'),
@@ -83,14 +85,15 @@ class TurbonomicScheduler(driver.Scheduler):
     def __init__(self, *args, **kwargs):
         super(TurbonomicScheduler, self).__init__(*args, **kwargs)
         self.turbonomic_rest_endpoint = CONF.turbonomic_protocol + "://" + CONF.turbonomic_address + "/vmturbo/rest/"
+        self.turbonomic_target_address = CONF.turbonomic_target_address
         self.auth = (CONF.turbonomic_username, CONF.turbonomic_password)
         self.notifier = rpc.get_notifier('scheduler')
         self.j_session_id = None
         self.region = None
         self.turbonomic_timeout = int(CONF.turbonomic_timeout)
         self.verify_ssl = ('true' == CONF.turbonomic_verify_ssl.lower())
-        LOG.info('Initialized, URL: {}, verify_ssl: {}, timeout: {}'.format(self.turbonomic_rest_endpoint, self.verify_ssl,
-                                                                            self.turbonomic_timeout))
+        LOG.info('Initialized, TurbonomicRestApiEndpoint: {}, TurbonomicTargetAddress: {}, verify_ssl: {}, timeout: {}'.format(
+            self.turbonomic_rest_endpoint, self.turbonomic_target_address, self.verify_ssl, self.turbonomic_timeout))
 
     def select_destinations(self, context, spec_obj):
         self.notifier.info(context, 'turbonomic_scheduler.select_destinations.start',
@@ -143,8 +146,8 @@ class TurbonomicScheduler(driver.Scheduler):
                                                                                     self.auth[0]))
             raise Exception('Login request timed out')
 
-    def get_dc_uuid(self, remote_addr, availability_zone):
-        LOG.info('Searching for DC: target: {}, AZ: {}'.format(remote_addr, availability_zone))
+    def get_dc_uuid(self, availability_zone):
+        LOG.info('Searching for DC: target: {}, AZ: {}'.format(self.turbonomic_target_address, availability_zone))
         try:
             entities_resp = requests.get(self.turbonomic_rest_endpoint + 'search?types=DataCenter',
                                      cookies={'JSESSIONID': self.j_session_id}, verify=self.verify_ssl, timeout = self.turbonomic_timeout)
@@ -153,21 +156,21 @@ class TurbonomicScheduler(driver.Scheduler):
             for ent in entities:
                 dc_uuid = ent.get('uuid', '')
                 dc_uuid_parts = dc_uuid.split(':')
-                if len(dc_uuid_parts) == 5 and 'OSS' == dc_uuid_parts[0] and remote_addr == dc_uuid_parts[1] \
-                        and 'DC' == dc_uuid_parts[3] and availability_zone == dc_uuid_parts[4]:
+                if len(dc_uuid_parts) == 5 and 'OSS' == dc_uuid_parts[0] and 'DC' == dc_uuid_parts[3] and \
+                                self.turbonomic_target_address == dc_uuid_parts[1] and availability_zone == dc_uuid_parts[4]:
                     self.region = dc_uuid_parts[2]
-                    LOG.info('Region: {}, DC: {}'.format(self.region, dc_uuid))
                     return dc_uuid
 
-            raise Exception('Region not found for target {}, AZ: {}'.format(remote_addr, availability_zone))
+            raise exception.NoValidHost(reason='Region not found for target {}, AZ: {}'.format(self.turbonomic_target_address,
+                                                                                               availability_zone))
 
         except exceptions.ReadTimeout:
             LOG.info('DC search request timed out: {}'.format(self.turbonomic_rest_endpoint + 'search?types=DataCenter'))
-            raise Exception('DC search request timed out')
+            raise exception.NoValidHost(reason='DC search request timed out')
 
 
-    def get_template_uuid(self, template_name, remote_addr):
-        full_template_name = '{}:{}::TMP-{}'.format(remote_addr, self.region, template_name)
+    def get_template_uuid(self, template_name):
+        full_template_name = '{}:{}::TMP-{}'.format(self.turbonomic_target_address, self.region, template_name)
         try:
             templates_response = requests.get(self.turbonomic_rest_endpoint + 'templates', cookies={'JSESSIONID': self.j_session_id},
                                           verify = self.verify_ssl, timeout = self.turbonomic_timeout)
@@ -178,11 +181,11 @@ class TurbonomicScheduler(driver.Scheduler):
                 if full_template_name == temp_name:
                     return template.get('uuid', '')
 
-            raise Exception('No template found for {}'.format(full_template_name))
+            raise exception.NoValidHost(reason='No template found for {}'.format(full_template_name))
 
         except exceptions.ReadTimeout:
             LOG.info('Template request timed out: {}'.format(self.turbonomic_rest_endpoint + 'templates'))
-            raise Exception('Template request timed out')
+            raise exception.NoValidHost(reason='Template request timed out')
 
     def create_reservation(self, context, spec_obj):
         self.reservationName = "OpenStack-Placement-Request-" + str(uuid.uuid4())
@@ -219,9 +222,9 @@ class TurbonomicScheduler(driver.Scheduler):
         if context.remote_address is None:
             raise Exception('Remote address not set')
 
-        dc_uuid = self.get_dc_uuid(context.remote_address, spec_obj.availability_zone)
+        dc_uuid = self.get_dc_uuid(spec_obj.availability_zone)
 
-        template_uuid = self.get_template_uuid(self.flavor_name, context.remote_address)
+        template_uuid = self.get_template_uuid(self.flavor_name)
 
         LOG.info('Creating placement {}, DeploymentProfile: {}, SchedulerHint: {}, Template: {}, DC: {}' .format(
             self.reservationName, self.deploymentProfile, str(self.scheduler_hint), template_uuid, dc_uuid))
