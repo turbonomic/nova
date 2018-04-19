@@ -230,7 +230,7 @@ class TurbonomicScheduler(driver.Scheduler):
             raise exception.NoValidHost(reason = 'Remote address not set')
 
         dc_uuid = self.get_dc_uuid(spec_obj.availability_zone)
-
+        placement_constraint = self.get_placement_constraint(dc_uuid, spec_obj)
         template_uuid = self.get_template_uuid(self.flavor_name)
 
         LOG.info('Creating placement {}, DeploymentProfile: {}, SchedulerHint: {}, Template: {}, DC: {}' .format(
@@ -244,11 +244,11 @@ class TurbonomicScheduler(driver.Scheduler):
                     constraints += ','
 
             placement = '{"demandName": "' + self.reservationName + '", "action": "PLACEMENT", "parameters": [ ' \
-                '{"placementParameters": {"count": ' + str(self.vmCount) + ', "templateID": "' + template_uuid + '", "constraintIDs":["' + dc_uuid + '"]},' \
+                '{"placementParameters": {"count": ' + str(self.vmCount) + ', "templateID": "' + template_uuid + '", "constraintIDs":[' + placement_constraint + ']},' \
                 '"deploymentParameters": {"deploymentProfileID": "' + self.deploymentProfile + '", "constraintIDs":[' + constraints + ']  }}]}'
         else:
             placement = '{"demandName": "' + self.reservationName + '", "action": "PLACEMENT", "parameters": [ ' \
-                    '{"placementParameters": {"count": ' + str(self.vmCount) + ', "templateID": "' + template_uuid + '", "constraintIDs":["' + dc_uuid + '"]},' \
+                    '{"placementParameters": {"count": ' + str(self.vmCount) + ', "templateID": "' + template_uuid + '", "constraintIDs":[' + placement_constraint + ']},' \
                     '"deploymentParameters": {"deploymentProfileID": "' + self.deploymentProfile + '"}}]}'
 
         LOG.info('Placement json: {}'.format(placement))
@@ -294,3 +294,19 @@ class TurbonomicScheduler(driver.Scheduler):
         except exceptions.ReadTimeout:
             LOG.info('Placement request timed out {}'.format(self.turbonomic_rest_endpoint + 'reservations'))
             raise exception.NoValidHost(reason = 'Placement request timed out')
+
+    def get_placement_constraint(self, dc_uuid, spec_obj):
+        uuid_filter = ''
+        if (spec_obj.flavor.extra_specs is not None):
+            for k, v in spec_obj.flavor.extra_specs.items():
+                keys = k.split(':')
+                if len(keys) == 2 and keys[0] == 'aggregate_instance_extra_specs':
+                    val = v.strip("'").strip('"')
+                    dc_uuid_parts = dc_uuid.split(':')
+                    uuid_filter += '"{}:{}:{}:{}:{}={}",'.format(dc_uuid_parts[0], dc_uuid_parts[1], dc_uuid_parts[2],
+                                                            'CLUSTER',
+                                                            keys[1], val)
+        if (uuid_filter):
+            return uuid_filter.strip(',')
+        else:
+            return '"{}"'.format(dc_uuid)
