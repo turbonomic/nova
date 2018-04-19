@@ -25,18 +25,21 @@ under the [DEFAULT] section
 scheduler_driver = nova.scheduler.turbonomic_scheduler.TurbonomicScheduler
 turbonomic_address = <Turbonomic_Address>  - mandatory
 openstack_target_address = <OpenStack_Target_Address> - mandatory
+openstack_scheduler_region = <Openstack_Scheduler_Region> - optional, defaults to RegionOne
 turbonomic_username = <Turbonomic_UserName> - optional, defaults to administrator
 turbonomic_password = <Turbonomic_Password> - optional, defaults to administrator
 turbonomic_protocol = <Turbonomic_Protocol> - optional, defaults to https
-turbonomic_timeout = <Turbonomic_Timeout> - optional, defaults to 60 seconds
+turbonomic_timeout = <Turbonomic_Timeout> - optional, defaults to 300 seconds
 turbonomic_verify_ssl = <Verify_ssl_certificate> - optional, defaults to False
 ------------------------------------------------------------
 NOTE: 1) 'scheduler_driver' might already be configured to the default scheduler
        Needs to be replaced if that's the case
 
-      2) scheduler_driver should be enabled across all regions, openstack_target_address must be equal to the address specified
-      by the customer while discovering the target, e.x. a target consists of RegionOne (X.X.X.10) and RegionTwo (X.X.X.11)
-      openstack_target_address must be set equal to X.X.X.10 both in RegionOne and RegionTwo
+      2) 'scheduler_driver' should be enabled across all regions. 'openstack_target_address' must be equal to the address specified
+      by the customer while discovering the target. 'openstack_scheduler_region' must be equal to the region where this scheduler will de deployed
+      For example - a target consists of RegionOne (X.X.X.10) and RegionTwo (X.X.X.11) and the user adds the target as X.X.X.10 in Turbonomic:
+      - 'openstack_target_address' must be set to X.X.X.10 in the schedulers of both RegionOne and RegionTwo
+      - 'openstack_scheduler_region' must be RegionOne for the scheduler in RegionOne and RegionTwo for the scheduler in RegionTwo
 
       3) In order to force NOVA deploy a new VM on a specific host, run the following command:
         nova boot --flavor <FLAVOR_ID> --image <IMG_UUID> --nic net-id=<NIC_ID> --availability-zone <AVAILABILITY_ZONE>:<HOST_NAME> <VM_NAME>
@@ -44,7 +47,7 @@ NOTE: 1) 'scheduler_driver' might already be configured to the default scheduler
       4) In order to force NOVA deploy a new VM in an affinity group, run the following command:
         nova boot --flavor <FLAVOR_ID> --image <IMG_UUID> --nic net-id=<NIC_ID> --availability-zone <AZ,e.x. nova> --hint group=<AFFINITY_GROUP_UUID> <VM_NAME>
 
-      5) This script should be placed to /lib/python2.7/site-packages/nova/scheduler
+      5) This script should be placed in the following directory - /lib/python2.7/site-packages/nova/scheduler
 
       6) This script is designed for OpenStack Mitaka
 
@@ -68,12 +71,13 @@ import json
 import uuid
 
 ext_opts = [
-    cfg.StrOpt('turbonomic_protocol', default='https', help='turbonomic Server protocol, http or https'),
-    cfg.StrOpt('turbonomic_address', default='default-address', help='turbonomic Server address'),
+    cfg.StrOpt('turbonomic_protocol', default='https', help='Turbonomic Server protocol, http or https'),
+    cfg.StrOpt('turbonomic_address', default='default-address', help='Turbonomic Server address'),
     cfg.StrOpt('openstack_target_address', default='default-address', help='OSP target address'),
-    cfg.StrOpt('turbonomic_timeout', default='60', help='turbonomic request timeout'),
-    cfg.StrOpt('turbonomic_username', default='administrator', help='turbonomic Server Username'),
-    cfg.StrOpt('turbonomic_password', default='administrator', help='turbonomic Server Password'),
+    cfg.StrOpt('openstack_scheduler_region', default='RegionOne', help='Region name where the OpenStack Scheduler is installed'),
+    cfg.StrOpt('turbonomic_timeout', default='300', help='Turbonomic request timeout'),
+    cfg.StrOpt('turbonomic_username', default='administrator', help='Turbonomic Server Username'),
+    cfg.StrOpt('turbonomic_password', default='administrator', help='Turbonomic Server Password'),
     cfg.StrOpt('turbonomic_verify_ssl', default='False', help='Verify SSL certificate'),
 ]
 
@@ -86,10 +90,10 @@ class TurbonomicScheduler(driver.Scheduler):
         super(TurbonomicScheduler, self).__init__(*args, **kwargs)
         self.turbonomic_rest_endpoint = CONF.turbonomic_protocol + "://" + CONF.turbonomic_address + "/vmturbo/rest/"
         self.openstack_target_address = CONF.openstack_target_address
+        self.openstack_scheduler_region = CONF.openstack_scheduler_region
         self.auth = (CONF.turbonomic_username, CONF.turbonomic_password)
         self.notifier = rpc.get_notifier('scheduler')
         self.j_session_id = None
-        self.region = None
         self.turbonomic_timeout = int(CONF.turbonomic_timeout)
         self.verify_ssl = ('true' == CONF.turbonomic_verify_ssl.lower())
         LOG.info('Initialized, TurbonomicRestApiEndpoint: {}, OpenStackTargetAddress: {}, verify_ssl: {}, timeout: {}'.format(
@@ -165,8 +169,9 @@ class TurbonomicScheduler(driver.Scheduler):
                 dc_uuid = ent.get('uuid', '')
                 dc_uuid_parts = dc_uuid.split(':')
                 if len(dc_uuid_parts) == 5 and 'OSS' == dc_uuid_parts[0] and 'DC' == dc_uuid_parts[3] and \
-                                self.openstack_target_address == dc_uuid_parts[1] and availability_zone == dc_uuid_parts[4]:
-                    self.region = dc_uuid_parts[2]
+                                self.openstack_target_address == dc_uuid_parts[1] and availability_zone == dc_uuid_parts[4] and \
+                                self.openstack_scheduler_region == dc_uuid_parts[2]:
+                    LOG.info('Returning DC: {}'.format(dc_uuid))
                     return dc_uuid
 
             raise exception.NoValidHost(reason='Region not found for target {}, AZ: {}'.format(self.openstack_target_address,
@@ -177,7 +182,7 @@ class TurbonomicScheduler(driver.Scheduler):
             raise exception.NoValidHost(reason='DC search request timed out')
 
     def get_template_uuid(self, template_name):
-        full_template_name = '{}:{}::TMP-{}'.format(self.openstack_target_address, self.region, template_name)
+        full_template_name = '{}:{}::TMP-{}'.format(self.openstack_target_address, self.openstack_scheduler_region, template_name)
         try:
             templates_response = requests.get(self.turbonomic_rest_endpoint + 'templates', cookies={'JSESSIONID': self.j_session_id},
                                           verify = self.verify_ssl, timeout = self.turbonomic_timeout)
