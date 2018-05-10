@@ -51,9 +51,7 @@ NOTE: 1) 'driver' might already be configured to the default scheduler
 
       6) This script is designed for OpenStack Pike
 
-    At the time of writing features 4 wwas unavailable in OpenStack UI and could be used only from CLI.
-
-    At the time of writing features 3 and 4 were unavailable in OpenStack UI and could be used only from CLI.
+    At the time of writing features 4 was unavailable in OpenStack UI and could be used only from CLI.
 """
 
 from oslo_config import cfg
